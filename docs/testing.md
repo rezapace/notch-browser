@@ -1,0 +1,69 @@
+# Pengujian dan validasi
+
+[README](../README.md) · [Penggunaan](usage.md) · [Pengembangan](development.md) · [Arsitektur](architecture.md)
+
+## Menjalankan tes
+
+Dari root `notch-browser`:
+
+```sh
+./scripts/test.sh
+./scripts/test.sh --bundle
+```
+
+[test.sh](../scripts/test.sh) mengompilasi [WorkspaceTests.swift](../Tests/NotchBrowserTests/WorkspaceTests.swift) dengan source browser/notch yang dibutuhkan, menjalankannya, lalu membersihkan executable sementara. Tes tidak memakai XCTest agar kompatibel dengan Command Line Tools yang tidak menyertakan framework tersebut. Gunakan script ini, bukan `swift test`.
+
+Tes window memerlukan sesi desktop macOS dan akan menampilkan panel sementara. Jangan mengubah fokus aplikasi selama tes fokus berjalan karena dapat mengubah hasilnya. Tidak memerlukan akses jaringan website untuk tes dasar.
+
+## Coverage otomatis
+
+| Kelompok | Yang diperiksa |
+| --- | --- |
+| Geometri layar | Compact/expanded berbagi top anchor pada tiga ukuran display dan origin negatif |
+| Border dan kamera | Inset tipis, rail kamera, sudut konten di dalam siluet |
+| Kebijakan interaksi | Preview, key focus, dan sheet mengendalikan auto-close |
+| Panel tunggal | Compact memakai satu nonactivating panel; identitas panel/shell/browser tetap |
+| Animasi | Top anchor tetap selama resize; completion lama tidak menimpa reopen |
+| Lifecycle | Expand/collapse berulang tidak melepas browser dari parent |
+| Fokus | Preview tidak merebut frontmost application atau key focus |
+| Mask/hit-test | Rendering dan area interaksi menggunakan siluet yang sama |
+| Chrome minimal | Hanya tab strip, navigation row, dan halaman; toolbar dua tombol dan satu URL field |
+| Layout konten | Chrome 68 pt tanpa gutter halaman tambahan |
+| Tab | Tambah/tutup tab, termasuk tab terakhir, tetap menghasilkan browser yang bisa dipakai |
+
+`--bundle` menambahkan build release dan dua pengujian resource:
+
+1. Salinan app di lokasi sementara harus membaca resource dari dalam app itu sendiri.
+2. Setelah resource salinan dihapus, validasi harus gagal walaupun `.build` pengembang masih tersedia.
+
+Tes negatif hanya mengubah salinan sementara, bukan artefak di `dist/`. Build juga memverifikasi signature dan resource.
+
+## Validasi DMG
+
+```sh
+./scripts/dmg.sh
+```
+
+Script memverifikasi checksum image, me-mount read-only, memeriksa signature dan resource app, memastikan shortcut Applications benar, lalu eject. Hasil akhir ada di `dist/NotchBrowser.dmg`.
+
+Build/verifikasi yang berhasil tidak berarti app sudah notarized. Panduan instalasi aman tersedia di [penggunaan](usage.md#instalasi).
+
+## Checklist manual sebelum distribusi
+
+- [ ] Hover notch fisik membuka preview tanpa mencuri fokus.
+- [ ] Pointer dapat bergerak ke bawah tanpa celah; collapse/reopen tidak berkedip.
+- [ ] Klik pertama, URL field, IME, copy/paste, dan shortcut bekerja.
+- [ ] Previous/next, tab baru, tab terakhir, dan `window.open` bekerja pada situs nyata.
+- [ ] Halaman gagal dimuat dapat dicoba lagi dengan ⌘R.
+- [ ] ⇧⌘W kembali ke notch; ⌘Q tidak meninggalkan panel.
+- [ ] Reduce Motion bekerja tanpa animasi resize.
+- [ ] Kamera tidak menutupi kontrol; menu bar dan Dock tetap dapat digunakan.
+- [ ] Monitor eksternal dilepas/dipasang, Spaces, dan fullscreen diuji.
+- [ ] Dialog/sheet website tidak menyebabkan auto-close yang salah.
+- [ ] App yang disalin dari DMG berjalan dari Applications, termasuk resource-nya.
+
+Kelulusan tes otomatis **bukan** klaim semua interaksi atau tampilan perangkat sudah tervalidasi. Screenshot visual belum menjadi bagian test runner.
+
+## Laporan masalah
+
+Sertakan versi macOS, arsitektur (`uname -m`), jumlah/konfigurasi monitor, versi aplikasi, langkah reproduksi, perilaku yang diharapkan, serta output build/test terkait. Hindari membagikan URL privat, cookie, atau data login.
