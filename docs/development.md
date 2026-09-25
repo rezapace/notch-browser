@@ -13,16 +13,26 @@ Semua perintah berikut dijalankan dari root `notch-browser`. Script juga dapat d
 
 ## Build aplikasi
 
+Dari root folder proyek, jalankan:
+
 ```sh
 ./scripts/build.sh
 open dist/NotchBrowser.app
 ```
 
-[build.sh](../scripts/build.sh) menjalankan SwiftPM release dengan `-Osize`, membuat `.icns` dari `Assets/AppIcon.png`, menulis Info.plist, menyalin resource/notice, melakukan strip dan ad-hoc codesign, lalu memverifikasi signature serta resource.
+`build.sh` adalah script zsh (`#!/bin/zsh`) yang melakukan langkah berikut:
+
+1. Mengaktifkan mode gagal-cepat (`set -euo pipefail`), berpindah ke root proyek, dan memastikan host adalah macOS.
+2. Mengompilasi executable release melalui SwiftPM dengan optimasi ukuran (`swift build -c release -Xswiftc -Osize`).
+3. Membuat ulang `dist/NotchBrowser.app`, lalu menyalin executable, bundle resource, dan notice lisensi ke dalam app bundle.
+4. Mengubah `Assets/AppIcon.png` menjadi ikon `.icns` menggunakan `sips` dan `iconutil`.
+5. Menulis `Contents/Info.plist` dengan metadata aplikasi, versi, bundle identifier, dan minimum macOS 13.
+6. Menghapus simbol debug, melakukan ad-hoc code signing, dan memverifikasi signature.
+7. Menjalankan `--check-resources` untuk memastikan resource dalam app tersedia, lalu mencetak lokasi dan ukuran hasil.
 
 Output selalu **`dist/NotchBrowser.app`**. Build baru menggantikan app hasil build sebelumnya, bukan aplikasi yang terpasang di `/Applications`. Versi app dan deployment minimum untuk bundle berada dalam Info.plist yang ditulis script; versi minimum target juga ada di [Package.swift](../Package.swift).
 
-Build mengikuti arsitektur host. Jangan menyebut hasilnya universal binary tanpa membangun dan memeriksa kedua arsitektur.
+Build mengikuti arsitektur host. Jangan menyebut hasilnya universal binary tanpa membangun dan memeriksa kedua arsitektur. Signing ad-hoc bukan Developer ID signing dan tidak menyertakan notarization.
 
 ## Build DMG
 
