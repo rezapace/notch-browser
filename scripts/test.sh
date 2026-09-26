@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-xcrun swiftc -parse-as-library \
+xcrun swiftc -D BROWSER_TESTING -parse-as-library \
     Sources/NotchBrowser/Notch/WorkspaceWindow.swift \
     Sources/NotchBrowser/Vendor/DynamicNotch.swift \
     Sources/NotchBrowser/Browser/*.swift \

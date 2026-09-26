@@ -2,6 +2,30 @@
 
 [README](../README.md) · [Arsitektur](architecture.md) · [Pengujian](testing.md)
 
+## Optimisasi v0.7.1
+
+- Dirty flag dipisah menjadi **title, address, history**. KVO judul hanya memperbarui label tab/judul window; tidak lagi memproses address bar atau tombol navigasi. Perubahan URL tetap menandai title karena host dipakai sebagai fallback untuk judul kosong.
+- Flag tetap dikumpulkan saat chrome tersembunyi. Penyelesaian editing dan Escape meminta sinkronisasi URL terbaru tanpa menimpa teks yang sedang diketik.
+- `didFinish` tab background/tertutup tidak lagi mengulang timer auto-hide toolbar aktif. Toolbar yang sudah tersembunyi atau dipin tidak membuat work item hide baru.
+- Counter kategori refresh hanya dikompilasi dengan `BROWSER_TESTING` pada test runner; tidak masuk binary release. Tes mengamati KVO nyata dari JavaScript fixture, bukan hanya fungsi dirty flag.
+- Mask notch, tracking pointer, konfigurasi WebKit, forced layout, dan lifecycle halaman dipertahankan. Belum ada bukti profiling untuk mengubah bagian tersebut dengan aman.
+
+### Pengukuran wrapper v0.7.0 → v0.7.1
+
+Tiga run per versi, bergantian v0.7.0 lalu v0.7.1, pada Mac16,12 / 16 GiB / macOS 15.7.4 dengan `scripts/perf.sh` dan `-Osize`. Baseline source dari tag v0.7.0; tidak ada counter test yang aktif. Tabel menunjukkan **median antar-run**, bukan skor website:
+
+| Pengukuran | v0.7.0 | v0.7.1 |
+| --- | ---: | ---: |
+| Constructor browser | 3,81 ms | 3,82 ms |
+| Median presentasi 10 tab per run | 0,013 ms | 0,012 ms |
+| Footprint proses utama, 10 tab kosong | 18,50 MiB | 18,47 MiB |
+| First load HTTP loopback setelah idle | 30,93 ms | 34,44 ms |
+| Repeat load HTTP loopback | 8,73 ms | 8,48 ms |
+
+First load berkisar 28,94–35,60 ms pada baseline dan 31,05–38,16 ms pada patch. Median first load justru naik pada sampel ini; tiga run tidak cukup untuk memastikan regresi atau perbaikan kecil. Patch tidak mengklaim mempercepat loading. Pengukuran berakhir saat `isLoading == false`, bukan first paint. CPU/footprint hanya proses utama, bukan WebContent/GPU/network.
+
+Hasil yang dibuktikan tes adalah **penghapusan jalur refresh yang tidak relevan** dan isolasi timer tab aktif. Probe tab kosong di atas terutama menjaga karakteristik startup/lifecycle; tidak menstimulasi beban metadata yang dioptimalkan. Tidak ada klaim peningkatan Speedometer atau menutup gap terhadap Chrome.
+
 ## Optimisasi v0.7.0
 
 - Constructor browser hanya menyiapkan UI native. Satu work item sesudahnya memanaskan **satu WebView cadangan** dengan HTML lokal, bukan website. Cadangan dipakai oleh tab normal pertama yang bernavigasi; tab kosong lain tidak membuat engine sendiri.
@@ -62,6 +86,30 @@ Contoh satu pengukuran lokal Apple Silicon / RAM 16 GB / macOS 15.7.4:
 | 10 tab | 4,156 ms | 0,033 ms |
 
 Footprint proses utama pada 10 tab kosong: 22,08 → 17,78 MiB. CPU idle proses utama pada sampel v0.6.0 berkisar 0,015–0,147%. Angka ini **tidak mencakup subprocess WebKit, GPU, atau networking**, bukan RAM total browser, dan sampel singkat bukan pengujian energi jangka panjang. Variasi kecil antarjumlah tab adalah noise; jangan menafsirkan tabel sebagai performa website.
+
+## Probe pembanding engine dan shell
+
+[engine-baseline.sh](../scripts/engine-baseline.sh) mengompilasi executable pengembang sementara, bukan mengganti aplikasi terpasang:
+
+```sh
+./scripts/engine-baseline.sh plain
+./scripts/engine-baseline.sh notch
+```
+
+Kedua mode memakai `WebKitRuntime.configuration()`, appearance gelap, dan ukuran viewport yang dihitung dari geometri layar NotchBrowser. `plain` memakai satu WKWebView dalam window biasa opaque tanpa mask/toolbar. `notch` memakai shell dan BrowserController produksi, tetapi tanpa coordinator hover/collapse; panel sengaja tetap terbuka. Perbedaannya mencakup beberapa komponen shell sekaligus, **bukan isolasi biaya mask saja**.
+
+Default membuka Speedometer **3.1** secara interaktif. Anda menjalankan dan menyimpan hasilnya sendiri. Untuk membandingkan versi lain, berikan **URL yang sama persis** di kedua mode, misalnya `./scripts/engine-baseline.sh plain https://browserbench.org/Speedometer3.0/`. Jangan mencampur versi benchmark saat membandingkan hasil lama.
+
+Tidak ada injeksi script atau deteksi khusus Speedometer, pengubahan GPU/JIT flags, pengumpulan skor otomatis, maupun logging URL/konten. Probe memakai kebijakan store persisten; jangan menganggap cache/profil executable pengembang identik dengan app terpasang atau Safari. Samakan kondisi warm-up/cache secara eksplisit. Probe bukan browser lengkap dan tidak mengukur subprocess otomatis.
+
+Smoke test kedua mode hanya mengakses fixture loopback dan memeriksa URL fixture, viewport, serta kebijakan datastore:
+
+```sh
+./scripts/engine-baseline.sh plain --smoke-test
+./scripts/engine-baseline.sh notch --smoke-test
+```
+
+Jika WKWebView minimal sebanding dengan NotchBrowser, selidiki engine/versi sebelum mengubah shell. Jika ada gap berulang, lanjutkan Instruments pada proses utama/WebContent dan jalur rendering. Bandingkan juga Safari dan Chrome; Safari bukan embedding WKWebView yang identik. Belum ada hasil Speedometer baru dari probe ini yang membuktikan percepatan.
 
 ## Mengukur website secara adil
 

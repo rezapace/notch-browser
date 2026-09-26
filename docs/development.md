@@ -129,6 +129,8 @@ Script build mencetak tiga ukuran berbeda: executable bytes, total byte file bun
 
 `perf.sh` menjalankan probe tab kosong untuk CPU/footprint proses utama, biaya UI, jumlah WebView, serta navigasi pertama/ulang ke fixture HTTP **loopback lokal**. Bukan benchmark JavaScript, first paint, atau RAM total browser; baca [performa](performance.md).
 
+Untuk membandingkan shell dengan WKWebView minimal, gunakan `./scripts/engine-baseline.sh plain` dan `./scripts/engine-baseline.sh notch`. Ini executable pengembang terpisah yang membuka Speedometer 3.1 secara interaktif; tidak masuk app release dan tidak menjalankan benchmark otomatis. Tambahkan `--smoke-test` sebagai argumen kedua untuk pengujian loopback tanpa internet. Lihat [panduan probe engine](performance.md#probe-pembanding-engine-dan-shell) sebelum membandingkan skor.
+
 Rincian coverage dan checklist tersedia di [pengujian](testing.md). Gunakan `swift package clean` untuk membersihkan cache build jika diperlukan; perintah ini tidak menghapus artefak `dist/`. `.build/`, `.swiftpm/`, `dist/`, `.DS_Store`, dan log diabaikan oleh version control.
 
 ## Migrasi dari struktur lama

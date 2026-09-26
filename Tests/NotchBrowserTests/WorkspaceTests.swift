@@ -214,6 +214,9 @@ struct WorkspaceTests {
         minimalWindow.makeFirstResponder(page)
         RunLoop.main.run(until: Date().addingTimeInterval(2.5))
         precondition(tabs.isHidden && navigation.isHidden, "Controls should auto-hide away from pointer/editor")
+        let hiddenHideCount = controller.refreshCounts.hideScheduled
+        controller.webView(page, didFinish: nil)
+        precondition(controller.refreshCounts.hideScheduled == hiddenHideCount, "Hidden controls must not schedule another hide")
         let viewport = page.bounds.size
         let browserRoot = root as! BrowserRootView
         precondition(browserRoot.trackingAreas.first?.rect.height == BrowserRootView.revealHeight)
@@ -257,6 +260,7 @@ struct WorkspaceTests {
         precondition(pages.subviews.first === page, "Reselecting the active tab must be a no-op")
         let fieldEditor = editor as! NSTextView
         fieldEditor.string = "unfinished input"
+        let beforeTitleChange = controller.refreshCounts
         var changedWhileEditing = false
         page.evaluateJavaScript("document.title = 'While editing'") { _, error in
             precondition(error == nil)
@@ -268,6 +272,11 @@ struct WorkspaceTests {
         }
         precondition(changedWhileEditing && titleButton.title == "While editing")
         precondition(fieldEditor.string == "unfinished input", "Metadata refresh must preserve the active editor")
+        precondition(minimalWindow.title == "NotchBrowser · While editing")
+        precondition(controller.refreshCounts.title > beforeTitleChange.title)
+        precondition(controller.refreshCounts.address == beforeTitleChange.address)
+        precondition(controller.refreshCounts.history == beforeTitleChange.history)
+        print("PASS: title-only KVO updates tab/window titles without processing address or history")
         minimalWindow.makeFirstResponder(page)
         RunLoop.main.run(until: Date().addingTimeInterval(1))
         precondition(tabs.isHidden)
@@ -275,6 +284,9 @@ struct WorkspaceTests {
         precondition(NSApp.sendAction(pin.action!, to: pin.target, from: pin))
         RunLoop.main.run(until: Date().addingTimeInterval(1))
         precondition(!tabs.isHidden && pin.state == .on)
+        let pinnedHideCount = controller.refreshCounts.hideScheduled
+        controller.webView(page, didFinish: nil)
+        precondition(controller.refreshCounts.hideScheduled == pinnedHideCount, "Pinned controls must not schedule a hide")
         invoke("New Tab")
         precondition(pages.subviews.count == 1 && page.isHidden)
         let address = navigation.subviews.flatMap(\.subviews).compactMap { $0 as? NSTextField }.first!
@@ -316,6 +328,68 @@ struct WorkspaceTests {
         precondition(networkMetrics["request_to_first_byte_ms"] is NSNumber && networkMetrics["download_ms"] is NSNumber)
         precondition(timingRecords.allSatisfy { !$0.contains("127.0.0.1") && !$0.contains("do-not-log") })
         print("PASS: loopback HTTP load produces Navigation Timing without logging its URL/query")
+
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        minimalWindow.makeFirstResponder(page)
+        var historyChanged = false
+        page.evaluateJavaScript("document.title = ''; history.pushState({}, '', '/history-change')") { _, error in
+            precondition(error == nil)
+            historyChanged = true
+        }
+        let historyDeadline = Date().addingTimeInterval(3)
+        while Date() < historyDeadline && (!historyChanged || !address.stringValue.hasSuffix("/history-change") || titleButton.title != "127.0.0.1") {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+        precondition(historyChanged && address.stringValue == page.url?.absoluteString)
+        precondition(titleButton.title == "127.0.0.1" && minimalWindow.title == "NotchBrowser · 127.0.0.1")
+        let backButton = navigation.subviews.compactMap { $0 as? NSButton }.first!
+        precondition(page.canGoBack && backButton.isEnabled)
+        precondition(NSApp.sendAction(focus.action!, to: focus.target, from: focus))
+        let historyEditor = minimalWindow.firstResponder as! NSTextView
+        historyEditor.string = "uncommitted address"
+        var replacedHistory = false
+        page.evaluateJavaScript("history.replaceState({}, '', '/while-editing')") { _, error in
+            precondition(error == nil)
+            replacedHistory = true
+        }
+        let replaceDeadline = Date().addingTimeInterval(3)
+        while Date() < replaceDeadline && (!replacedHistory || page.url?.path != "/while-editing") {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+        precondition(replacedHistory && page.url?.path == "/while-editing")
+        precondition(historyEditor.string == "uncommitted address")
+        precondition(controller.control(address, textView: historyEditor, doCommandBy: #selector(NSResponder.cancelOperation(_:))))
+        precondition(address.stringValue == page.url?.absoluteString)
+        print("PASS: same-document history updates address/buttons and fallback titles; Escape restores the latest URL")
+
+        // A real background navigation must update its chip, not the active toolbar's timer.
+        let background = controller.webView(page, createWebViewWith: WebKitRuntime.configuration(),
+            for: WKNavigationAction(), windowFeatures: WKWindowFeatures())!
+        let backgroundTitle = scroll.documentView!.subviews.last!.subviews.first as! NSButton
+        precondition(NSApp.sendAction(sameTab.action!, to: sameTab.target, from: sameTab))
+        precondition(NSApp.sendAction(pin.action!, to: pin.target, from: pin))
+        precondition(pin.state == .off)
+        precondition(NSApp.sendAction(focus.action!, to: focus.target, from: focus))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        let beforeBackground = controller.refreshCounts
+        let activeTitle = minimalWindow.title
+        background.load(URLRequest(url: URL(string: "http://127.0.0.1:\(port)/background")!))
+        let backgroundDeadline = Date().addingTimeInterval(5)
+        while Date() < backgroundDeadline && (background.isLoading || backgroundTitle.title != "Timing fixture") {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        precondition(!background.isLoading && backgroundTitle.title == "Timing fixture")
+        precondition(background.isHidden && !page.isHidden && minimalWindow.title == activeTitle)
+        precondition(controller.refreshCounts.hideScheduled == beforeBackground.hideScheduled)
+        precondition(controller.refreshCounts.title == beforeBackground.title)
+        precondition(controller.refreshCounts.address == beforeBackground.address)
+        precondition(controller.refreshCounts.history == beforeBackground.history)
+        controller.webViewDidClose(background)
+        let afterClose = controller.refreshCounts.hideScheduled
+        controller.webView(background, didFinish: nil)
+        precondition(controller.refreshCounts.hideScheduled == afterClose)
+        print("PASS: background and closed-page finishes do not reschedule the active toolbar; background chip stays current")
 
         let metrics = NavigationDiagnostics.sanitizedMetrics([
             "dns_ms": 2.5, "connect_ms": -1, "tls_ms": true, "load_ms": Double.infinity,

@@ -125,7 +125,9 @@ Tab normal memakai `WebKitRuntime` dengan `WKWebsiteDataStore.default()`. Pemili
 
 Observer URL/title/back/forward dimiliki tab, menggunakan weak capture, dan dibersihkan saat tab ditutup. Perubahan digabung per runloop dan hanya memperbarui label tab yang kotor; view tombol/tab dipertahankan sampai tab ditutup. Pembaruan view ditunda ketika compact **atau chrome auto-hide**; WebKit tetap menjadi model hidup dan dirty flags diterapkan sekali ketika reveal. Layout tab dijalankan hanya ketika struktur, pilihan, atau lebar berubah. Nilai tombol, URL, dan judul window yang identik tidak ditulis ulang. Editor URL aktif tidak ditimpa oleh refresh metadata. Perubahan judul tidak memindahkan scroll tab. URL field menggunakan text engine native macOS.
 
-Auto-hide memakai timer sekali jalan 800 ms dan tracking enter/exit area atas, bukan polling. ⌘L, tab kosong, editor aktif, fokus kontrol, sheet, dan opsi pin menjaga kontrol dapat diakses. Appearance gelap diteruskan ke WebKit; tidak ada injeksi CSS atau manipulasi engine. Inspector hanya aktif pada build `DEBUG`.
+Dirty state navigasi dipisah menjadi title/address/history. Observer judul hanya meminta pembaruan label tab dan judul window; observer URL juga meminta title untuk fallback host. Back/forward hanya menandai history. Pemilihan tab menyinkronkan semua kategori; selesai editing/Escape menyinkronkan address terbaru. Counter refresh hanya ada dalam kompilasi test runner, tidak pada release.
+
+Auto-hide memakai timer sekali jalan 800 ms dan tracking enter/exit area atas, bukan polling. Penyelesaian navigasi background atau tab tertutup tidak mengulang timer toolbar aktif; kontrol yang tersembunyi/dipin tidak menjadwalkan hide baru. ⌘L, tab kosong, editor aktif, fokus kontrol, sheet, dan opsi pin menjaga kontrol dapat diakses. Appearance gelap diteruskan ke WebKit; tidak ada injeksi CSS atau manipulasi engine. Inspector hanya aktif pada build `DEBUG`.
 
 Root minimal berisi tab strip, navigation row, dan halaman. Tidak ada sidebar, bookmark/history UI, autocomplete, favicon fetch, progress bar, atau header tambahan. Batas perilaku data dijelaskan di [penggunaan](usage.md#data-dan-jaringan).
 

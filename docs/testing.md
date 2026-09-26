@@ -35,6 +35,11 @@ Tes window memerlukan sesi desktop macOS dan akan menampilkan panel sementara. J
 | Auto-hide | Hover/editor/fokus/sheet/home/pin menahan hide; dirty title ditunda lalu diterapkan pada reveal |
 | Input | Memilih tab aktif tidak mengubah fokus; metadata tidak menimpa teks URL yang sedang diedit |
 | Timing | Navigasi HTTP lokal benar-benar selesai di URL fixture; field numerik saja, callback lama/tab tertutup diabaikan |
+| Refresh terarah | KVO judul memperbarui tab/window tanpa memproses address/history; diverifikasi counter test-only |
+| History API | `pushState`/`replaceState`, judul fallback, tombol back, URL saat editing, dan Escape |
+| Background | Loading fixture memperbarui chip background tanpa mengulang timer toolbar atau memproses navigasi tab aktif; callback finish setelah close diabaikan |
+
+Test runner menggunakan `-D BROWSER_TESTING` untuk counter numerik jalur refresh/timer; counter ini tidak dikompilasi pada app release. Saat ini terdapat **22 kelompok tes** utama.
 
 `--bundle` menambahkan build release, pemeriksaan path build di binary, dan tiga pengujian resource:
 
@@ -78,6 +83,15 @@ Kelulusan tes otomatis **bukan** klaim semua interaksi atau tampilan perangkat s
 ## Pengukuran performa
 
 Jalankan `./scripts/perf.sh` untuk probe UI/tab kosong dan first/repeat load fixture HTTP loopback. Hitungan WebView termasuk satu cadangan yang belum dimiliki tab. `isLoading == false` adalah akhir pengukuran fixture, bukan first paint. Constructor UI yang cepat tidak berarti pemanasan WebKit dihapus; pekerjaan tersebut ditunda ke main queue. Prosedur perbandingan website dan batas angka pengukuran dijelaskan di [performa](performance.md).
+
+### Smoke test probe engine
+
+```sh
+./scripts/engine-baseline.sh plain --smoke-test
+./scripts/engine-baseline.sh notch --smoke-test
+```
+
+Kedua mode hanya memuat fixture HTTP loopback, tanpa akses benchmark publik. Tes memeriksa viewport yang cocok, halaman benar-benar selesai dimuat, view terpasang, serta kebijakan store persisten. Mode interaktif dan batas interpretasi tersedia di [panduan probe engine](performance.md#probe-pembanding-engine-dan-shell). Kelulusan smoke test bukan hasil Speedometer.
 
 ## Laporan masalah
 
