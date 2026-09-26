@@ -20,14 +20,14 @@ Dari root folder proyek, jalankan:
 open dist/NotchBrowser.app
 ```
 
-`build.sh` adalah script zsh (`#!/bin/zsh`) yang melakukan langkah berikut:
+[build.sh](../scripts/build.sh) adalah script zsh (`#!/bin/zsh`) yang melakukan langkah berikut:
 
 1. Mengaktifkan mode gagal-cepat (`set -euo pipefail`), berpindah ke root proyek, dan memastikan host adalah macOS.
 2. Mengompilasi executable release melalui SwiftPM dengan optimasi ukuran (`swift build -c release -Xswiftc -Osize`).
 3. Membuat ulang `dist/NotchBrowser.app`, lalu menyalin executable, bundle resource, dan notice lisensi ke dalam app bundle.
 4. Mengubah `Assets/AppIcon.png` menjadi ikon `.icns` menggunakan `sips` dan `iconutil`.
 5. Menulis `Contents/Info.plist` dengan metadata aplikasi, versi, bundle identifier, dan minimum macOS 13.
-6. Menghapus simbol debug, melakukan ad-hoc code signing, dan memverifikasi signature.
+6. Menghapus simbol debug, memeriksa kebocoran path build, melakukan ad-hoc code signing, dan memverifikasi signature.
 7. Menjalankan `--check-resources` untuk memastikan resource dalam app tersedia, lalu mencetak lokasi dan ukuran hasil.
 
 Output selalu **`dist/NotchBrowser.app`**. Build baru menggantikan app hasil build sebelumnya, bukan aplikasi yang terpasang di `/Applications`. Versi app dan deployment minimum untuk bundle berada dalam Info.plist yang ditulis script; versi minimum target juga ada di [Package.swift](../Package.swift).
@@ -47,7 +47,7 @@ open dist/NotchBrowser.dmg
 - symlink `Applications` menuju `/Applications`;
 - `INSTALL.txt` berisi panduan singkat.
 
-Script memverifikasi checksum image, me-mount secara read-only, memverifikasi signature dan resource app dari volume tersebut, lalu eject. DMG baru dipindahkan ke **`dist/NotchBrowser.dmg`** setelah verifikasi berhasil. SHA-256 dan ukuran byte dicetak di terminal.
+Script memverifikasi checksum image, me-mount secara read-only, memverifikasi signature dan resource app dari volume tersebut, lalu eject. DMG baru dipindahkan ke **`dist/NotchBrowser.dmg`** setelah verifikasi berhasil. SHA-256 dan ukuran byte dicetak di terminal; `dist/SHA256SUMS` selalu dibuat ulang agar cocok dengan DMG baru.
 
 DMG tidak menambahkan notarization. Baca [notice komponen](../licenses/THIRD_PARTY_NOTICES.md), khususnya kelengkapan notice Quantum, sebelum redistribusi publik.
 
@@ -89,7 +89,7 @@ App bundle menyimpan resource di:
 NotchBrowser.app/Contents/Resources/NotchBrowser_NotchBrowser.bundle/icon.svg
 ```
 
-`AppResources` mencari lokasi ini secara eksplisit untuk `.app`, tanpa fallback ke path `.build` mesin pengembang. Executable bare/`swift run` menggunakan `Bundle.module`. Ikon app `.icns` dan notice lisensi ikut masuk `Contents/Resources`.
+`AppResources` mencari lokasi ini secara eksplisit untuk `.app`, tanpa fallback ke path `.build` mesin pengembang. Executable bare/`swift run` mencari bundle relatif di sebelah executable. Jangan memakai `Bundle.module`: accessor SwiftPM menyimpan path absolut mesin pembuat sebagai string yang dapat ikut terbawa ke binary release, walaupun `.build/` sudah diabaikan Git. Ikon app `.icns` dan notice lisensi ikut masuk `Contents/Resources`.
 
 Script build mencetak tiga ukuran berbeda: executable bytes, total byte file bundle, dan pemakaian disk. Nilainya bukan penggunaan RAM atau ukuran engine WebKit.
 
@@ -98,7 +98,10 @@ Script build mencetak tiga ukuran berbeda: executable bytes, total byte file bun
 ```sh
 ./scripts/test.sh
 ./scripts/test.sh --bundle
+./scripts/perf.sh
 ```
+
+`perf.sh` menjalankan probe halaman kosong untuk CPU/footprint proses utama dan biaya pembaruan UI. Bukan benchmark JavaScript atau RAM total browser; baca [performa](performance.md).
 
 Rincian coverage dan checklist tersedia di [pengujian](testing.md). Gunakan `swift package clean` untuk membersihkan cache build jika diperlukan; perintah ini tidak menghapus artefak `dist/`. `.build/`, `.swiftpm/`, `dist/`, `.DS_Store`, dan log diabaikan oleh version control.
 

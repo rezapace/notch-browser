@@ -12,6 +12,8 @@ NotchBrowser adalah browser minimal untuk macOS yang menyatu dengan notch MacBoo
 - **Pratinjau saat hover:** membuka browser tanpa mengambil fokus keyboard; klik untuk mulai berinteraksi.
 - **Tab sederhana:** tambah, pilih, dan tutup tab. Tab dan halaman tetap hidup saat panel dikecilkan.
 - **Navigasi web:** kolom URL/pencarian, previous, next, dan reload.
+- **Kontrol auto-hide:** tab (+/×), URL, previous, dan next tersembunyi saat membaca halaman, tanpa mengubah ukuran viewport.
+- **Tema gelap:** sudut bawah lebih rounded, tepi tipis, dan konten aman dari kamera.
 - **Pintasan keyboard:** kontrol utama tersedia tanpa menambah toolbar yang ramai.
 - **Layar tanpa notch:** panel ditempatkan di tengah tepi atas layar utama.
 
@@ -66,9 +68,11 @@ Penjelasan lengkap tentang script build, resource, dan packaging ada di [panduan
 
 Arahkan kursor ke notch selama sekitar **120 ms** untuk membuka pratinjau. Klik browser untuk mulai mengetik atau berinteraksi dengan halaman. Keluar dari pratinjau yang belum diklik akan mengecilkan panel setelah jeda singkat.
 
+Kontrol muncul kembali saat hover tepi atas area halaman atau **⌘L**. Pilih **View → Always Show Controls** jika ingin kontrol tetap terlihat.
+
 | Pintasan | Fungsi |
 | --- | --- |
-| ⌘L | Fokus ke kolom alamat |
+| ⌘L | Tampilkan kontrol dan fokus ke kolom alamat |
 | ⌘T | Buka tab baru |
 | ⌘W | Tutup tab saat ini |
 | ⌘1–⌘9 | Pilih tab |
@@ -112,6 +116,7 @@ Tes window memerlukan sesi desktop macOS dan dapat menampilkan panel sementara. 
 - [Pengembangan](docs/development.md) — persyaratan, build app/DMG, dan resource.
 - [Arsitektur](docs/architecture.md) — panel tunggal, geometri, hover, fokus, dan lifecycle.
 - [Pengujian](docs/testing.md) — tes otomatis dan validasi distribusi.
+- [Performa](docs/performance.md) — optimisasi UI, GPU/cache WebKit, dan pengukuran dengan `./scripts/perf.sh`.
 - [Lisensi komponen](licenses/THIRD_PARTY_NOTICES.md) — atribusi dan lisensi komponen.
 
 ## Kontribusi dan laporan masalah

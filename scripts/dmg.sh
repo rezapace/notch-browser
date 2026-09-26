@@ -44,6 +44,8 @@ codesign --verify --strict "$MOUNT/NotchBrowser.app"
 hdiutil detach "$MOUNT"
 MOUNTED=0
 mv -f "$TMP/NotchBrowser.dmg" "$OUTPUT"
+(cd dist && shasum -a 256 NotchBrowser.dmg > SHA256SUMS)
 shasum -a 256 "$OUTPUT"
+echo "Checksum file: $PWD/dist/SHA256SUMS"
 echo "DMG bytes: $(stat -f '%z' "$OUTPUT")"
 echo "Created: $OUTPUT"

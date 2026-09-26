@@ -3,15 +3,19 @@ import QuartzCore
 
 /// Compact and expanded frames share exactly the same top anchor.
 enum WorkspaceGeometry {
-    // 8pt shoulder + 2pt visible border; content corners follow the shell curve.
+    // One shell mask clips both the browser and the rounded lower corners.
     static let sideInset: CGFloat = 10
     static let bottomInset: CGFloat = 2
-    static let contentCornerRadius: CGFloat = 12
+    static let expandedCornerRadius: CGFloat = 28
 
     static func expandedFrame(in screenFrame: NSRect, visibleFrame: NSRect, topInset: CGFloat) -> NSRect {
-        let width = min(1180, screenFrame.width * 0.84)
+        // Prefer an 850×650 page where the display permits it. Respect a Dock
+        // on either side while staying centered on the physical screen/notch.
+        let availableWidth = max(1, min(screenFrame.width - 16,
+            2 * min(screenFrame.midX - visibleFrame.minX, visibleFrame.maxX - screenFrame.midX) - 16))
+        let width = min(1180, availableWidth, max(850 + sideInset * 2, screenFrame.width * 0.84))
         let availableHeight = max(1, screenFrame.maxY - visibleFrame.minY - 16)
-        let height = min(800, visibleFrame.height * 0.84 + topInset, availableHeight)
+        let height = min(900, availableHeight, max(650 + topInset + bottomInset, visibleFrame.height * 0.90 + topInset))
         return NSRect(x: screenFrame.midX - width / 2, y: screenFrame.maxY - height, width: width, height: height)
     }
 
@@ -27,9 +31,10 @@ enum WorkspaceGeometry {
     }
 
     /// DynamicNotchShape is y-down; AppKit's container and layer here are y-up.
-    static func silhouette(in bounds: NSRect) -> CGPath {
+    static func silhouette(in bounds: NSRect, expanded: Bool = true) -> CGPath {
         var flip = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: bounds.minY + bounds.maxY)
-        let path = DynamicNotchShape(direction: .top, cornerRadius: 14, shoulderRadius: 8).path(in: bounds).cgPath
+        let radius = expanded ? expandedCornerRadius : 14
+        let path = DynamicNotchShape(direction: .top, cornerRadius: radius, shoulderRadius: 8).path(in: bounds).cgPath
         return path.copy(using: &flip)!
     }
 }
@@ -46,6 +51,7 @@ final class WorkspaceWindow: NSPanel {
     var onExpandRequested: (() -> Void)?
     var onHoverChanged: ((Bool) -> Void)?
     var onInteraction: (() -> Void)?
+    var onFocusChanged: (() -> Void)?
     private let surface = WorkspaceSurface(frame: .zero)
     private var transitionID = 0
     private var targetScreen: NSScreen?
@@ -172,6 +178,14 @@ final class WorkspaceWindow: NSPanel {
         super.sendEvent(event)
     }
 
+    @discardableResult
+    override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
+        let changed = firstResponder !== responder
+        let accepted = super.makeFirstResponder(responder)
+        if accepted && changed { onFocusChanged?() }
+        return accepted
+    }
+
     override func performClose(_ sender: Any?) { onDismiss?() }
 }
 
@@ -190,6 +204,14 @@ final class WorkspaceSurface: NSView {
     private var browserSize = NSSize(width: 900, height: 600)
     private var topInset: CGFloat = 40
     private var cameraGap: CGFloat = 0
+    private struct GeometryState: Equatable {
+        let bounds: NSRect
+        let browserSize: NSSize
+        let topInset: CGFloat
+        let cameraGap: CGFloat
+        let expanded: Bool
+    }
+    private var lastGeometry: GeometryState?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -217,6 +239,7 @@ final class WorkspaceSurface: NSView {
         browserView = view
         addSubview(view)
         view.isHidden = !expanded
+        lastGeometry = nil
         updateGeometry()
     }
 
@@ -248,17 +271,24 @@ final class WorkspaceSurface: NSView {
     }
 
     private func updateGeometry() {
-        shapePath = WorkspaceGeometry.silhouette(in: bounds)
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        shapeMask.frame = bounds
-        shapeMask.path = shapePath
-        CATransaction.commit()
+        let state = GeometryState(bounds: bounds, browserSize: browserSize,
+            topInset: topInset, cameraGap: cameraGap, expanded: expanded)
+        guard state != lastGeometry else { return }
+        if lastGeometry?.bounds != bounds || lastGeometry?.expanded != expanded {
+            shapePath = WorkspaceGeometry.silhouette(in: bounds, expanded: expanded)
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            shapeMask.frame = bounds
+            shapeMask.path = shapePath
+            CATransaction.commit()
+        }
+        lastGeometry = state
         // Keep WebKit's viewport stable during animation; clip rather than squash it.
         let target = WorkspaceGeometry.browserFrame(in: browserSize, topInset: topInset)
-        browserView?.frame = NSRect(x: (bounds.width - target.width) / 2,
-                                   y: bounds.height - topInset - target.height,
-                                   width: target.width, height: target.height)
+        let browserFrame = NSRect(x: (bounds.width - target.width) / 2,
+                                  y: bounds.height - topInset - target.height,
+                                  width: target.width, height: target.height)
+        if browserView?.frame != browserFrame { browserView?.frame = browserFrame }
         let center = bounds.midX
         leading.frame = NSRect(x: center - cameraGap / 2 - 68, y: (bounds.height - 16) / 2, width: 56, height: 16)
         trailing.frame = NSRect(x: center + cameraGap / 2 + 12, y: (bounds.height - 12) / 2, width: 12, height: 12)

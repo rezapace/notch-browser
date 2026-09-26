@@ -8,7 +8,11 @@ enum AppResources {
             let url = resources.appendingPathComponent("NotchBrowser_NotchBrowser.bundle")
             return Bundle(url: url)?.url(forResource: "icon", withExtension: "svg")
         }
-        // swift run / the bare executable use SwiftPM's resource layout.
-        return Bundle.module.url(forResource: "icon", withExtension: "svg")
+        // Resolve beside the executable, never through Bundle.module: SwiftPM's
+        // generated accessor embeds an absolute path from the build machine.
+        guard let executable = Bundle.main.executableURL else { return nil }
+        let url = executable.deletingLastPathComponent()
+            .appendingPathComponent("NotchBrowser_NotchBrowser.bundle")
+        return Bundle(url: url)?.url(forResource: "icon", withExtension: "svg")
     }
 }

@@ -3,3 +3,12 @@
 /dist/
 .DS_Store
 *.log
+
+# Local secrets/signing material must not be committed.
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.key

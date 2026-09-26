@@ -6,6 +6,10 @@ private final class BrowserTab {
     var observations: [NSKeyValueObservation] = []
     var error: String?
     var isHome = true
+    var needsRefresh = true
+    let item = NSView()
+    var titleButton: BrowserButton?
+    var isSelected = false
     var title: String {
         if let error { return error }
         if isHome { return "New Tab" }
@@ -62,7 +66,7 @@ private final class BrowserButton: NSButton {
 final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelegate, WKUIDelegate {
     var onDismissRequested: (() -> Void)?
     private let window: WorkspaceWindow
-    private let root = NSView()
+    private let root = BrowserRootView()
     private let tabStrip = NSView()
     private let toolbar = NSView()
     private let pages = NSView()
@@ -73,6 +77,10 @@ final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelega
     private var forward: BrowserButton!
     private var tabs: [BrowserTab] = []
     private var selectedIndex = -1
+    private var refreshPending = false
+    private var chromeHideWork: DispatchWorkItem?
+    private var browserPresented = false
+    private var controlsPinned = false
     private var currentTab: BrowserTab? { tabs.indices.contains(selectedIndex) ? tabs[selectedIndex] : nil }
 
     init(window: WorkspaceWindow) {
@@ -83,36 +91,97 @@ final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelega
         addTab()
     }
 
-    func prepareForPresentation() { root.layoutSubtreeIfNeeded(); renderTabs(); syncNavigation() }
-    func prepareForDismissal() { window.makeFirstResponder(nil) }
+    func prepareForPresentation() {
+        browserPresented = window.isPresented
+        root.layoutSubtreeIfNeeded()
+        flushRefreshes()
+        renderTabs()
+        syncNavigation()
+        setControlsVisible(true)
+        scheduleChromeHide()
+    }
+    func prepareForDismissal() {
+        browserPresented = false
+        chromeHideWork?.cancel()
+        window.makeFirstResponder(nil)
+    }
     func focusAddressIfHome() { if currentTab?.isHome == true { focusAddress(nil) } }
+
+    private func setControlsVisible(_ visible: Bool) {
+        guard root.controlsVisible != visible else { return }
+        root.controlsVisible = visible
+        tabStrip.isHidden = !visible
+        toolbar.isHidden = !visible
+    }
+
+    private func scheduleChromeHide() {
+        chromeHideWork?.cancel()
+        guard browserPresented else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.browserPresented else { return }
+            let focused = self.window.firstResponder as? NSView
+            let controlsFocused = focused.map {
+                $0.isDescendant(of: self.tabStrip) || $0.isDescendant(of: self.toolbar)
+            } ?? false
+            guard BrowserChromePolicy.canHide(pointerInside: self.root.pointerInsideChrome,
+                editing: self.address.currentEditor() != nil, controlsFocused: controlsFocused,
+                hasSheet: self.window.attachedSheet != nil, isHome: self.currentTab?.isHome == true,
+                pinned: self.controlsPinned || NSWorkspace.shared.isVoiceOverEnabled) else { return }
+            self.setControlsVisible(false)
+        }
+        chromeHideWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: work)
+    }
+
+    func controlTextDidBeginEditing(_ notification: Notification) {
+        chromeHideWork?.cancel()
+        setControlsVisible(true)
+    }
+    func controlTextDidEndEditing(_ notification: Notification) { scheduleChromeHide() }
+
+    @objc private func togglePinnedControls(_ sender: NSMenuItem) {
+        controlsPinned.toggle()
+        sender.state = controlsPinned ? .on : .off
+        setControlsVisible(true)
+        scheduleChromeHide()
+    }
 
     private func buildChrome() {
         root.wantsLayer = true
         root.layer?.backgroundColor = NSColor.black.cgColor
+        root.appearance = NSAppearance(named: .darkAqua)
+        root.onChromeHoverChanged = { [weak self] inside in
+            guard let self, self.browserPresented else { return }
+            if inside { self.chromeHideWork?.cancel(); self.setControlsVisible(true) }
+            else { self.scheduleChromeHide() }
+        }
+        window.onFocusChanged = { [weak self] in self?.scheduleChromeHide() }
         window.installBrowser(root)
         root.setAccessibilityIdentifier("browser.root")
-        for view in [tabStrip, toolbar, pages] {
+        for view in [pages, tabStrip, toolbar] {
             view.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(view)
         }
         tabStrip.setAccessibilityIdentifier("browser.tabs")
         toolbar.setAccessibilityIdentifier("browser.navigation")
         pages.setAccessibilityIdentifier("browser.pages")
+        // One outer shell mask supplies rounded lower corners; no nested page mask.
         pages.wantsLayer = true
-        pages.layer?.cornerRadius = WorkspaceGeometry.contentCornerRadius
-        pages.layer?.masksToBounds = true
         pages.layer?.backgroundColor = NSColor(calibratedWhite: 0.07, alpha: 1).cgColor
+        for chrome in [tabStrip, toolbar] {
+            chrome.wantsLayer = true
+            chrome.layer?.backgroundColor = NSColor.black.cgColor
+        }
         NSLayoutConstraint.activate([
             tabStrip.topAnchor.constraint(equalTo: root.topAnchor),
             tabStrip.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             tabStrip.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            tabStrip.heightAnchor.constraint(equalToConstant: 30),
-            toolbar.topAnchor.constraint(equalTo: tabStrip.bottomAnchor, constant: 2),
+            tabStrip.heightAnchor.constraint(equalToConstant: 32),
+            toolbar.topAnchor.constraint(equalTo: tabStrip.bottomAnchor),
             toolbar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             toolbar.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            toolbar.heightAnchor.constraint(equalToConstant: 32),
-            pages.topAnchor.constraint(equalTo: toolbar.bottomAnchor, constant: 4),
+            toolbar.heightAnchor.constraint(equalToConstant: 36),
+            pages.topAnchor.constraint(equalTo: root.topAnchor),
             pages.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             pages.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             pages.bottomAnchor.constraint(equalTo: root.bottomAnchor)
@@ -180,20 +249,19 @@ final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelega
 
     // MARK: Tabs / WebKit
 
-    private func addTab(configuration: WKWebViewConfiguration = WKWebViewConfiguration(), home: Bool = true) {
-        if home {
-            configuration.applicationNameForUserAgent = "Version/\(max(26, ProcessInfo.processInfo.operatingSystemVersion.majorVersion)).0 Safari/605.1.15"
-        }
-        configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
-        configuration.preferences.isElementFullscreenEnabled = true
-        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+    private func addTab(configuration: WKWebViewConfiguration = WebKitRuntime.configuration(), home: Bool = true) {
+        // Preserve configurations supplied by WebKit for window.open, including
+        // their data store/process relationship. Do not replace these with ours.
         let web = WKWebView(frame: .zero, configuration: configuration)
         web.navigationDelegate = self
         web.uiDelegate = self
-        web.appearance = NSAppearance(named: .aqua)
+        web.appearance = NSAppearance(named: .darkAqua)
+        web.underPageBackgroundColor = NSColor(calibratedWhite: 0.07, alpha: 1)
         web.translatesAutoresizingMaskIntoConstraints = false
         web.isHidden = true
+        #if DEBUG
         if #available(macOS 13.3, *) { web.isInspectable = true }
+        #endif
         pages.addSubview(web)
         NSLayoutConstraint.activate([
             web.topAnchor.constraint(equalTo: pages.topAnchor), web.bottomAnchor.constraint(equalTo: pages.bottomAnchor),
@@ -201,14 +269,11 @@ final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelega
         ])
         let tab = BrowserTab(web)
         tab.isHome = home
-        // URL/title observations also handle SPA navigation and back/forward changes.
+        installTabItem(tab)
+        // Coalesce URL/title/back/forward changes into one main-runloop update.
         let refresh: () -> Void = { [weak self, weak tab] in
-            DispatchQueue.main.async { [weak self, weak tab] in
-                guard let self, let tab, self.tabs.contains(where: { $0 === tab }) else { return }
-                if let url = tab.webView.url { tab.isHome = url.absoluteString == "about:blank" }
-                if tab === self.currentTab { self.syncNavigation() }
-                self.renderTabs()
-            }
+            guard let self, let tab else { return }
+            self.scheduleRefresh(tab)
         }
         tab.observations = [
             web.observe(\.url) { _, _ in refresh() },
@@ -229,8 +294,11 @@ final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelega
         currentTab?.webView.isHidden = true
         selectedIndex = index
         currentTab?.webView.isHidden = false
+        flushRefreshes()
         syncNavigation()
-        renderTabs()
+        renderTabs(revealSelection: true)
+        setControlsVisible(true)
+        scheduleChromeHide()
     }
 
     private func closeTab(_ tab: BrowserTab) {
@@ -241,6 +309,7 @@ final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelega
         tab.webView.navigationDelegate = nil
         tab.webView.uiDelegate = nil
         tab.webView.removeFromSuperview()
+        tab.item.removeFromSuperview()
         tabs.remove(at: index)
         if tabs.isEmpty { selectedIndex = -1; addTab(); return }
         if wasSelected { selectedIndex = -1; selectTab(min(index, tabs.count - 1)) }
@@ -250,33 +319,74 @@ final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelega
         }
     }
 
-    private func renderTabs() {
-        tabDocument.subviews.forEach { $0.removeFromSuperview() }
-        let width: CGFloat = 164
-        tabDocument.frame = NSRect(x: 0, y: 0, width: max(tabScroll.contentSize.width, CGFloat(tabs.count) * width), height: 30)
-        for (index, tab) in tabs.enumerated() {
-            let item = NSView(frame: NSRect(x: CGFloat(index) * width, y: 1, width: width - 4, height: 28))
-            item.wantsLayer = true
-            item.layer?.cornerRadius = 8
-            item.layer?.backgroundColor = NSColor.white.withAlphaComponent(index == selectedIndex ? 0.10 : 0.025).cgColor
-            let select = BrowserButton(title: tab.title, tooltip: tab.title) { [weak self, weak tab] in
-                guard let self, let tab, let index = self.tabs.firstIndex(where: { $0 === tab }) else { return }
-                self.selectTab(index)
-            }
-            select.frame = NSRect(x: 6, y: 0, width: width - 40, height: 28)
-            select.alignment = .left
-            select.lineBreakMode = .byTruncatingTail
-            let close = BrowserButton(symbol: "xmark", tooltip: "Close tab") { [weak self, weak tab] in
-                if let tab { self?.closeTab(tab) }
-            }
-            close.frame = NSRect(x: width - 30, y: 1, width: 24, height: 26)
-            item.addSubview(select)
-            item.addSubview(close)
-            tabDocument.addSubview(item)
+    private func installTabItem(_ tab: BrowserTab) {
+        let item = tab.item
+        item.wantsLayer = true
+        item.layer?.cornerRadius = 8
+        item.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.025).cgColor
+        let select = BrowserButton(title: tab.title, tooltip: tab.title) { [weak self, weak tab] in
+            guard let self, let tab, let index = self.tabs.firstIndex(where: { $0 === tab }) else { return }
+            self.selectTab(index)
         }
-        let x = max(0, CGFloat(selectedIndex + 1) * width - tabScroll.contentSize.width)
-        tabScroll.contentView.scroll(to: NSPoint(x: x, y: 0))
-        tabScroll.reflectScrolledClipView(tabScroll.contentView)
+        select.frame = NSRect(x: 6, y: 0, width: 124, height: 28)
+        select.alignment = .left
+        select.lineBreakMode = .byTruncatingTail
+        let close = BrowserButton(symbol: "xmark", tooltip: "Close tab") { [weak self, weak tab] in
+            if let tab { self?.closeTab(tab) }
+        }
+        close.frame = NSRect(x: 134, y: 1, width: 24, height: 26)
+        tab.titleButton = select
+        item.addSubview(select)
+        item.addSubview(close)
+        tabDocument.addSubview(item)
+    }
+
+    private func updateTabTitle(_ tab: BrowserTab) {
+        let title = tab.title
+        guard tab.titleButton?.title != title else { return }
+        tab.titleButton?.title = title
+        tab.titleButton?.toolTip = title
+        tab.titleButton?.setAccessibilityLabel(title)
+    }
+
+    private func scheduleRefresh(_ tab: BrowserTab) {
+        tab.needsRefresh = true
+        guard browserPresented, !refreshPending else { return }
+        refreshPending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.refreshPending = false
+            if self.browserPresented { self.flushRefreshes() }
+        }
+    }
+
+    private func flushRefreshes() {
+        for tab in tabs where tab.needsRefresh {
+            tab.needsRefresh = false
+            if let url = tab.webView.url { tab.isHome = url.absoluteString == "about:blank" }
+            updateTabTitle(tab)
+            if tab === currentTab { syncNavigation() }
+        }
+    }
+
+    private func renderTabs(revealSelection: Bool = false) {
+        let width: CGFloat = 164
+        let frame = NSRect(x: 0, y: 0, width: max(tabScroll.contentSize.width, CGFloat(tabs.count) * width), height: 30)
+        if tabDocument.frame != frame { tabDocument.frame = frame }
+        for (index, tab) in tabs.enumerated() {
+            let frame = NSRect(x: CGFloat(index) * width, y: 1, width: width - 4, height: 28)
+            if tab.item.frame != frame { tab.item.frame = frame }
+            let selected = index == selectedIndex
+            if tab.isSelected != selected {
+                tab.isSelected = selected
+                tab.item.layer?.backgroundColor = NSColor.white.withAlphaComponent(selected ? 0.10 : 0.025).cgColor
+            }
+            updateTabTitle(tab)
+        }
+        if revealSelection, tabs.indices.contains(selectedIndex) {
+            tabDocument.scrollToVisible(tabs[selectedIndex].item.frame)
+            tabScroll.reflectScrolledClipView(tabScroll.contentView)
+        }
     }
 
     private func syncNavigation() {
@@ -308,6 +418,7 @@ final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelega
         window.makeFirstResponder(tab.webView)
         address.stringValue = target.absoluteString
         tab.webView.load(URLRequest(url: target))
+        scheduleChromeHide()
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy command: Selector) -> Bool {
@@ -321,19 +432,29 @@ final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelega
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        tabs.first(where: { $0.webView === webView })?.error = nil
+        if let tab = tabs.first(where: { $0.webView === webView }) {
+            tab.error = nil
+            scheduleRefresh(tab)
+        }
     }
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { syncNavigation(); renderTabs() }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if let tab = tabs.first(where: { $0.webView === webView }) { scheduleRefresh(tab) }
+        scheduleChromeHide()
+    }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { showFailure(webView, error: error) }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { showFailure(webView, error: error) }
     private func showFailure(_ webView: WKWebView, error: Error) {
         guard (error as NSError).code != NSURLErrorCancelled else { return }
-        tabs.first(where: { $0.webView === webView })?.error = "Could not load page"
-        syncNavigation(); renderTabs()
+        if let tab = tabs.first(where: { $0.webView === webView }) {
+            tab.error = "Could not load page"
+            scheduleRefresh(tab)
+        }
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        tabs.first(where: { $0.webView === webView })?.error = "Reload with ⌘R"
-        syncNavigation(); renderTabs()
+        if let tab = tabs.first(where: { $0.webView === webView }) {
+            tab.error = "Reload with ⌘R"
+            scheduleRefresh(tab)
+        }
     }
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         addTab(configuration: configuration, home: false)
@@ -346,7 +467,12 @@ final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelega
     // Keyboard/menu actions stay available without extra on-screen controls.
     @objc private func newTab(_ sender: Any?) { addTab(); focusAddress(nil) }
     @objc private func closeCurrentTab(_ sender: Any?) { if let tab = currentTab { closeTab(tab) } }
-    @objc private func focusAddress(_ sender: Any?) { window.makeFirstResponder(address); address.selectText(nil) }
+    @objc private func focusAddress(_ sender: Any?) {
+        chromeHideWork?.cancel()
+        setControlsVisible(true)
+        window.makeFirstResponder(address)
+        address.selectText(nil)
+    }
     @objc private func goBack(_ sender: Any?) { currentTab?.webView.goBack() }
     @objc private func goForward(_ sender: Any?) { currentTab?.webView.goForward() }
     @objc private func reload(_ sender: Any?) { currentTab?.error = nil; currentTab?.webView.reload() }
@@ -375,6 +501,7 @@ final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelega
         for (title, selector, key) in [("Undo", #selector(UndoManager.undo), "z"), ("Cut", #selector(NSText.cut(_:)), "x"), ("Copy", #selector(NSText.copy(_:)), "c"), ("Paste", #selector(NSText.paste(_:)), "v"), ("Select All", #selector(NSText.selectAll(_:)), "a")] {
             edit.addItem(withTitle: title, action: selector, keyEquivalent: key)
         }
+        action(menu("View"), "Always Show Controls", #selector(togglePinnedControls(_:)), "")
         let navigation = menu("Navigation")
         action(navigation, "Address", #selector(focusAddress(_:)), "l")
         action(navigation, "Previous", #selector(goBack(_:)), "[")

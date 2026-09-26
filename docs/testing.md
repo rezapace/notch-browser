@@ -19,22 +19,25 @@ Tes window memerlukan sesi desktop macOS dan akan menampilkan panel sementara. J
 
 | Kelompok | Yang diperiksa |
 | --- | --- |
-| Geometri layar | Compact/expanded berbagi top anchor pada tiga ukuran display dan origin negatif |
+| Geometri layar | Top anchor, viewport target, layar kecil, origin negatif, dan Dock kiri/kanan |
 | Border dan kamera | Inset tipis, rail kamera, sudut konten di dalam siluet |
 | Kebijakan interaksi | Preview, key focus, dan sheet mengendalikan auto-close |
 | Panel tunggal | Compact memakai satu nonactivating panel; identitas panel/shell/browser tetap |
 | Animasi | Top anchor tetap selama resize; completion lama tidak menimpa reopen |
 | Lifecycle | Expand/collapse berulang tidak melepas browser dari parent |
 | Fokus | Preview tidak merebut frontmost application atau key focus |
-| Mask/hit-test | Rendering dan area interaksi menggunakan siluet yang sama |
+| Mask/hit-test | Siluet sama; repeated layout memakai ulang path mask |
 | Chrome minimal | Hanya tab strip, navigation row, dan halaman; toolbar dua tombol dan satu URL field |
-| Layout konten | Chrome 68 pt tanpa gutter halaman tambahan |
-| Tab | Tambah/tutup tab, termasuk tab terakhir, tetap menghasilkan browser yang bisa dipakai |
+| Layout konten | Overlay 68 pt tidak mengubah ukuran halaman; tidak ada mask halaman bertingkat |
+| Tab | Tambah/tutup termasuk tab terakhir, view chip dipakai ulang, WebView tertutup dilepas |
+| WebKit | Store persisten bersama, dark appearance, popup otomatis diblokir, inspector release mati |
+| Auto-hide | Hover/editor/fokus/sheet/home/pin menahan hide; ⌘L dan menu pin menampilkan kontrol |
 
-`--bundle` menambahkan build release dan dua pengujian resource:
+`--bundle` menambahkan build release, pemeriksaan path build di binary, dan tiga pengujian resource:
 
 1. Salinan app di lokasi sementara harus membaca resource dari dalam app itu sendiri.
-2. Setelah resource salinan dihapus, validasi harus gagal walaupun `.build` pengembang masih tersedia.
+2. Executable bare yang dipindah harus membaca resource bundle di sebelahnya.
+3. Setelah resource salinan app dihapus, validasi harus gagal walaupun `.build` pengembang masih tersedia.
 
 Tes negatif hanya mengubah salinan sementara, bukan artefak di `dist/`. Build juga memverifikasi signature dan resource.
 
@@ -44,7 +47,7 @@ Tes negatif hanya mengubah salinan sementara, bukan artefak di `dist/`. Build ju
 ./scripts/dmg.sh
 ```
 
-Script memverifikasi checksum image, me-mount read-only, memeriksa signature dan resource app, memastikan shortcut Applications benar, lalu eject. Hasil akhir ada di `dist/NotchBrowser.dmg`.
+Script memverifikasi checksum image, me-mount read-only, memeriksa signature dan resource app, memastikan shortcut Applications benar, lalu eject. Hasil akhir ada di `dist/NotchBrowser.dmg` dan checksum baru di `dist/SHA256SUMS`.
 
 Build/verifikasi yang berhasil tidak berarti app sudah notarized. Panduan instalasi aman tersedia di [penggunaan](usage.md#instalasi).
 
@@ -53,6 +56,9 @@ Build/verifikasi yang berhasil tidak berarti app sudah notarized. Panduan instal
 - [ ] Hover notch fisik membuka preview tanpa mencuri fokus.
 - [ ] Pointer dapat bergerak ke bawah tanpa celah; collapse/reopen tidak berkedip.
 - [ ] Klik pertama, URL field, IME, copy/paste, dan shortcut bekerja.
+- [ ] Kontrol auto-hide setelah keluar area atas, reveal hover tidak berkedip, ⌘L tetap aman saat IME.
+- [ ] WebView tidak resize saat reveal/hide; bagian halaman di bawah overlay dapat diakses setelah hide.
+- [ ] Dark-mode situs yang mendukungnya, sudut bawah 28 pt, VoiceOver, dan menu pin diuji visual.
 - [ ] Previous/next, tab baru, tab terakhir, dan `window.open` bekerja pada situs nyata.
 - [ ] Halaman gagal dimuat dapat dicoba lagi dengan ⌘R.
 - [ ] ⇧⌘W kembali ke notch; ⌘Q tidak meninggalkan panel.
@@ -63,6 +69,10 @@ Build/verifikasi yang berhasil tidak berarti app sudah notarized. Panduan instal
 - [ ] App yang disalin dari DMG berjalan dari Applications, termasuk resource-nya.
 
 Kelulusan tes otomatis **bukan** klaim semua interaksi atau tampilan perangkat sudah tervalidasi. Screenshot visual belum menjadi bagian test runner.
+
+## Pengukuran performa
+
+Jalankan `./scripts/perf.sh` untuk probe UI/halaman kosong. Prosedur perbandingan website dan batas angka pengukuran dijelaskan di [performa](performance.md).
 
 ## Laporan masalah
 

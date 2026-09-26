@@ -29,6 +29,12 @@ Klik ikon Dock untuk membuka browser secara eksplisit. Panel tidak dapat di-drag
 
 UI hanya berisi tab horizontal (+/×), kolom URL, previous, dan next. Tab panjang dapat di-scroll horizontal; halaman awal sengaja kosong.
 
+Kontrol **auto-hide setelah 800 ms** ketika pointer meninggalkan kontrol. Hover **8 pt teratas area halaman, tepat di bawah rail notch**, atau tekan **⌘L** untuk menampilkannya kembali. Kontrol berupa overlay: halaman tidak resize saat kontrol muncul/hilang, tetapi 68 pt bagian atas halaman tertutup sementara ketika kontrol tampil.
+
+Kontrol tetap terlihat pada tab kosong, saat mengedit URL, fokus keyboard berada di kontrol, ada sheet, atau VoiceOver aktif. Menu **View → Always Show Controls** menonaktifkan auto-hide selama sesi berjalan.
+
+Chrome dan WebView menggunakan appearance gelap. Website yang mendukung `prefers-color-scheme: dark` mengikuti tema; website yang memaksakan warna terang tidak dimodifikasi dengan injeksi CSS.
+
 | Pintasan | Fungsi |
 | --- | --- |
 | ⌘L | Fokus address bar |
@@ -42,7 +48,9 @@ UI hanya berisi tab horizontal (+/×), kolom URL, previous, dan next. Tab panjan
 
 ## Data dan jaringan
 
-- WebKit mengelola persistent website store, cookie, dan HTTP cache.
+- Semua tab normal menggunakan persistent website store WebKit yang sama, termasuk cookie dan HTTP cache. Profil lama dipertahankan; startup/collapse tidak menghapus cache.
+- Cache mengikuti aturan response server dan kebijakan WebKit; ukurannya tidak dipaksa melalui API privat.
+- Popup otomatis tanpa interaksi pengguna diblokir. Link/new-window yang diizinkan WebKit tetap memakai konfigurasi asalnya.
 - Tidak ada request autocomplete atau favicon tambahan. Input URL diproses saat Enter; teks biasa membuka Google Search setelah Enter.
 - Halaman website yang sudah terbuka tetap dapat membuat request sendiri.
 - History/bookmark UI dan preferensi sidebar lama tidak lagi dipakai. Data/cache lama tidak dihapus otomatis.

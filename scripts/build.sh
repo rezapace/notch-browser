@@ -30,8 +30,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleName</key><string>NotchBrowser</string>
 <key>CFBundleDisplayName</key><string>NotchBrowser</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.5.0</string>
-<key>CFBundleVersion</key><string>5</string>
+<key>CFBundleShortVersionString</key><string>0.6.0</string>
+<key>CFBundleVersion</key><string>6</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>NSHighResolutionCapable</key><true/>
@@ -39,6 +39,13 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </dict></plist>
 PLIST
 strip -S -x "$APP/Contents/MacOS/NotchBrowser"
+# A .gitignore does not prevent development paths from becoming binary strings.
+if LC_ALL=C grep -aEq '/Users/|/home/' "$APP/Contents/MacOS/NotchBrowser" || \
+   LC_ALL=C grep -aFq "$PWD" "$APP/Contents/MacOS/NotchBrowser"; then
+    echo 'FAIL: build-machine path found in distribution executable' >&2
+    exit 1
+fi
+echo 'PASS: distribution executable contains no build-machine home/project path'
 codesign --force --sign - "$APP"
 codesign --verify --strict "$APP"
 "$APP/Contents/MacOS/NotchBrowser" --check-resources
