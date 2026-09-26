@@ -13,7 +13,7 @@ Dari root `notch-browser`:
 
 [test.sh](../scripts/test.sh) mengompilasi [WorkspaceTests.swift](../Tests/NotchBrowserTests/WorkspaceTests.swift) dengan source browser/notch yang dibutuhkan, menjalankannya, lalu membersihkan executable sementara. Tes tidak memakai XCTest agar kompatibel dengan Command Line Tools yang tidak menyertakan framework tersebut. Gunakan script ini, bukan `swift test`.
 
-Tes window memerlukan sesi desktop macOS dan akan menampilkan panel sementara. Jangan mengubah fokus aplikasi selama tes fokus berjalan karena dapat mengubah hasilnya. Tidak memerlukan akses jaringan website untuk tes dasar.
+Tes window memerlukan sesi desktop macOS dan akan menampilkan panel sementara. Jangan mengubah fokus aplikasi selama tes fokus berjalan karena dapat mengubah hasilnya. Tidak memerlukan internet. Tes loading menjalankan fixture HTTP sementara yang hanya bind ke loopback `127.0.0.1` dengan port dinamis; request tidak dicatat.
 
 ## Coverage otomatis
 
@@ -29,9 +29,12 @@ Tes window memerlukan sesi desktop macOS dan akan menampilkan panel sementara. J
 | Mask/hit-test | Siluet sama; repeated layout memakai ulang path mask |
 | Chrome minimal | Hanya tab strip, navigation row, dan halaman; toolbar dua tombol dan satu URL field |
 | Layout konten | Overlay 68 pt tidak mengubah ukuran halaman; tidak ada mask halaman bertingkat |
-| Tab | Tambah/tutup termasuk tab terakhir, view chip dipakai ulang, WebView tertutup dilepas |
+| Tab | 20 tab kosong berbagi satu engine cadangan; adopsi saat navigasi, tutup tab terakhir, dan cleanup WebView |
+| Popup | WebView langsung dibuat; konfigurasi/store yang diberikan WebKit tidak diganti |
 | WebKit | Store persisten bersama, dark appearance, popup otomatis diblokir, inspector release mati |
-| Auto-hide | Hover/editor/fokus/sheet/home/pin menahan hide; ⌘L dan menu pin menampilkan kontrol |
+| Auto-hide | Hover/editor/fokus/sheet/home/pin menahan hide; dirty title ditunda lalu diterapkan pada reveal |
+| Input | Memilih tab aktif tidak mengubah fokus; metadata tidak menimpa teks URL yang sedang diedit |
+| Timing | Navigasi HTTP lokal benar-benar selesai di URL fixture; field numerik saja, callback lama/tab tertutup diabaikan |
 
 `--bundle` menambahkan build release, pemeriksaan path build di binary, dan tiga pengujian resource:
 
@@ -60,6 +63,8 @@ Build/verifikasi yang berhasil tidak berarti app sudah notarized. Panduan instal
 - [ ] WebView tidak resize saat reveal/hide; bagian halaman di bawah overlay dapat diakses setelah hide.
 - [ ] Dark-mode situs yang mendukungnya, sudut bawah 28 pt, VoiceOver, dan menu pin diuji visual.
 - [ ] Previous/next, tab baru, tab terakhir, dan `window.open` bekerja pada situs nyata.
+- [ ] Navigasi sangat cepat setelah startup (sebelum warm-up selesai), redirect, reload setelah gagal, dan rapid tab-close tidak menerima callback navigasi lama.
+- [ ] Bandingkan first load/repeat load dengan diagnostik opt-in, kemudian matikan flag untuk benchmark resmi.
 - [ ] Halaman gagal dimuat dapat dicoba lagi dengan ⌘R.
 - [ ] ⇧⌘W kembali ke notch; ⌘Q tidak meninggalkan panel.
 - [ ] Reduce Motion bekerja tanpa animasi resize.
@@ -72,7 +77,7 @@ Kelulusan tes otomatis **bukan** klaim semua interaksi atau tampilan perangkat s
 
 ## Pengukuran performa
 
-Jalankan `./scripts/perf.sh` untuk probe UI/halaman kosong. Prosedur perbandingan website dan batas angka pengukuran dijelaskan di [performa](performance.md).
+Jalankan `./scripts/perf.sh` untuk probe UI/tab kosong dan first/repeat load fixture HTTP loopback. Hitungan WebView termasuk satu cadangan yang belum dimiliki tab. `isLoading == false` adalah akhir pengukuran fixture, bukan first paint. Constructor UI yang cepat tidak berarti pemanasan WebKit dihapus; pekerjaan tersebut ditunda ke main queue. Prosedur perbandingan website dan batas angka pengukuran dijelaskan di [performa](performance.md).
 
 ## Laporan masalah
 

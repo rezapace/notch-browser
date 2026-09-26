@@ -8,6 +8,7 @@ xcrun swiftc -Osize -whole-module-optimization -parse-as-library \
     Sources/NotchBrowser/Notch/WorkspaceWindow.swift \
     Sources/NotchBrowser/Vendor/DynamicNotch.swift \
     Sources/NotchBrowser/Browser/*.swift \
+    Tests/NotchBrowserTests/LocalHTTPServer.swift \
     Tests/NotchBrowserTests/PerformanceProbe.swift \
     -o "$TMP/PerformanceProbe"
 "$TMP/PerformanceProbe"

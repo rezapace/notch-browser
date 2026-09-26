@@ -25,6 +25,16 @@ Aplikasi menggunakan ad-hoc signing dan **belum dinotariskan oleh Apple**. Jika 
 
 ## Instalasi
 
+### Homebrew
+
+```sh
+brew install --cask rezapace/notch-browser/notch-browser
+```
+
+Tap proyek tersedia di [rezapace/homebrew-notch-browser](https://github.com/rezapace/homebrew-notch-browser). Untuk update, uninstall, trust, dan migrasi dari instalasi manual, lihat [panduan Homebrew](docs/homebrew.md). Binary tetap arm64/macOS 13+ dan belum notarized.
+
+### DMG manual
+
 1. Unduh dan buka `NotchBrowser.dmg`.
 2. Seret `NotchBrowser.app` ke **Applications**.
 3. Eject DMG, lalu jalankan aplikasi dari Applications.
@@ -113,6 +123,7 @@ Tes window memerlukan sesi desktop macOS dan dapat menampilkan panel sementara. 
 ## Dokumentasi
 
 - [Penggunaan](docs/usage.md) — instalasi, pintasan, data, dan batasan.
+- [Homebrew](docs/homebrew.md) — install/update melalui tap dan pemeliharaan cask.
 - [Pengembangan](docs/development.md) — persyaratan, build app/DMG, dan resource.
 - [Arsitektur](docs/architecture.md) — panel tunggal, geometri, hover, fokus, dan lifecycle.
 - [Pengujian](docs/testing.md) — tes otomatis dan validasi distribusi.

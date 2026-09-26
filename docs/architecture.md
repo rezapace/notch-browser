@@ -19,7 +19,7 @@ AppDelegate
     │       └── BrowserController.root
     │           ├── tab strip horizontal (+/×)
     │           ├── previous / next / URL
-    │           └── WKWebView per tab
+    │           └── WKWebView untuk tab yang sudah bernavigasi
     └── BrowserController → panel yang sama
 ```
 
@@ -30,6 +30,7 @@ AppDelegate
 | [BrowserController.swift](../Sources/NotchBrowser/Browser/BrowserController.swift) | Kontrol native, tab, URL, WebKit, menu shortcut |
 | [BrowserRootView.swift](../Sources/NotchBrowser/Browser/BrowserRootView.swift) | Tracking reveal area dan kebijakan auto-hide kontrol |
 | [WebKitRuntime.swift](../Sources/NotchBrowser/Browser/WebKitRuntime.swift) | Konfigurasi WebKit dan profil cache persisten bersama |
+| [NavigationDiagnostics.swift](../Sources/NotchBrowser/Browser/NavigationDiagnostics.swift) | Timing navigasi opt-in, tanpa URL atau data halaman |
 | [NotchCoordinator.swift](../Sources/NotchBrowser/Notch/NotchCoordinator.swift) | Screen selection, hover, debounce, kebijakan fokus |
 | [WorkspaceWindow.swift](../Sources/NotchBrowser/Notch/WorkspaceWindow.swift) | Panel, shell, geometry, mask, animasi, tracking |
 | [DynamicNotch.swift](../Sources/NotchBrowser/Vendor/DynamicNotch.swift) | Source vendored; `DynamicNotchShape` dipakai shell |
@@ -116,12 +117,18 @@ Tracking menggunakan `NSTrackingArea` `.activeAlways` untuk enter/exit/move, ter
 
 ## Browser dan resource
 
-Satu `WKWebView` dibuat per tab. Tab normal memakai `WebKitRuntime` dengan `WKWebsiteDataStore.default()` dan pool bersama; ini tidak menjamin satu proses web. Tidak ada reset profil atau UUID store baru. `window.open` menggunakan konfigurasi WebKit yang diberikan **tanpa mengganti pool/store-nya**.
+Tab kosong adalah model + kontrol native, tanpa WebView sendiri. Setelah constructor UI selesai, satu work item main-queue menyiapkan **maksimal satu WebView cadangan** dengan HTML kosong lokal. Navigasi normal pertama mengadopsi cadangan tersebut; jika pengguna lebih cepat, work item dibatalkan dan WebView dibuat langsung. Warm-up bukan prefetch website. Callback navigasi HTML pemanasan tidak boleh menimpa URL/state navigasi pengguna.
 
-Observer URL/title/back/forward dimiliki tab, menggunakan weak capture, dan dibersihkan saat tab ditutup. Perubahan digabung per runloop dan hanya memperbarui label tab yang kotor; view tombol/tab dipertahankan sampai tab ditutup. Pembaruan KVO ketika compact ditunda sampai presentasi berikutnya. Perubahan judul tidak memindahkan scroll tab. URL field menggunakan text engine native macOS.
+Tab berikutnya membuat WebView hanya ketika diperlukan, kemudian mempertahankannya selama tab hidup. Menutup tab terakhir tetap menyisakan tab native kosong, tanpa membuat engine baru. Memilih tab aktif merupakan no-op agar fokus editor dan visibility WebView tidak terganggu.
+
+Tab normal memakai `WebKitRuntime` dengan `WKWebsiteDataStore.default()`. Pemilihan `WKProcessPool` eksplisit dihapus karena SDK menyatakan tidak berpengaruh sejak macOS 12; minimum aplikasi macOS 13. Tidak ada reset profil atau UUID store baru. `window.open` **langsung** membuat WebView dengan konfigurasi yang diberikan, bukan memakai cadangan atau mengganti store-nya.
+
+Observer URL/title/back/forward dimiliki tab, menggunakan weak capture, dan dibersihkan saat tab ditutup. Perubahan digabung per runloop dan hanya memperbarui label tab yang kotor; view tombol/tab dipertahankan sampai tab ditutup. Pembaruan view ditunda ketika compact **atau chrome auto-hide**; WebKit tetap menjadi model hidup dan dirty flags diterapkan sekali ketika reveal. Layout tab dijalankan hanya ketika struktur, pilihan, atau lebar berubah. Nilai tombol, URL, dan judul window yang identik tidak ditulis ulang. Editor URL aktif tidak ditimpa oleh refresh metadata. Perubahan judul tidak memindahkan scroll tab. URL field menggunakan text engine native macOS.
 
 Auto-hide memakai timer sekali jalan 800 ms dan tracking enter/exit area atas, bukan polling. ⌘L, tab kosong, editor aktif, fokus kontrol, sheet, dan opsi pin menjaga kontrol dapat diakses. Appearance gelap diteruskan ke WebKit; tidak ada injeksi CSS atau manipulasi engine. Inspector hanya aktif pada build `DEBUG`.
 
 Root minimal berisi tab strip, navigation row, dan halaman. Tidak ada sidebar, bookmark/history UI, autocomplete, favicon fetch, progress bar, atau header tambahan. Batas perilaku data dijelaskan di [penggunaan](usage.md#data-dan-jaringan).
+
+`--diagnose-loading` mengaktifkan pencatatan timing lokal. Default tidak membuat collector atau mengeksekusi script diagnostik. Collector mencocokkan identitas `WKNavigation`, mengabaikan callback lama, dan membuang state tab tertutup. Setelah `didFinish`, satu pembacaan Navigation Timing dalam isolated world mengambil angka whitelist saja; tidak ada polling atau user script permanen. URL, title, header, isi halaman, dan teks error tidak dicetak.
 
 App terpasang mencari resource di `Contents/Resources`, tanpa fallback `.build`; executable SwiftPM mencari bundle di sebelah executable. `Bundle.module` tidak direferensikan karena accessor hasil generate menanam path build absolut. Build distribusi menolak binary yang masih mengandung path home/proyek mesin pembuat. Rincian packaging ada di [pengembangan](development.md#resource-portabel), sedangkan invariant geometri, fokus, dan lifecycle diuji melalui [pengujian](testing.md).

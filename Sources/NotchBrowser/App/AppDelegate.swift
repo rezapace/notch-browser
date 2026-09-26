@@ -31,7 +31,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let screen = NSScreen.main {
             window.reposition(on: screen)
         }
-        let browser = BrowserController(window: window)
+        let diagnostics = CommandLine.arguments.contains("--diagnose-loading") ? NavigationDiagnostics() : nil
+        let browser = BrowserController(window: window, diagnostics: diagnostics)
         let coordinator = NotchCoordinator(window: window, browser: browser)
         self.coordinator = coordinator
         coordinator.start()

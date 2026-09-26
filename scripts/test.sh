@@ -7,6 +7,7 @@ xcrun swiftc -parse-as-library \
     Sources/NotchBrowser/Notch/WorkspaceWindow.swift \
     Sources/NotchBrowser/Vendor/DynamicNotch.swift \
     Sources/NotchBrowser/Browser/*.swift \
+    Tests/NotchBrowserTests/LocalHTTPServer.swift \
     Tests/NotchBrowserTests/WorkspaceTests.swift \
     -o "$TMP/WorkspaceTests"
 "$TMP/WorkspaceTests"

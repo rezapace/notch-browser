@@ -51,6 +51,18 @@ Script memverifikasi checksum image, me-mount secara read-only, memverifikasi si
 
 DMG tidak menambahkan notarization. Baca [notice komponen](../licenses/THIRD_PARTY_NOTICES.md), khususnya kelengkapan notice Quantum, sebelum redistribusi publik.
 
+## Distribusi Homebrew
+
+Tap GUI menggunakan `Casks/notch-browser.rb` di [repository tap terpisah](https://github.com/rezapace/homebrew-notch-browser), bukan `Formula/` di repository aplikasi.
+
+Setelah membuat DMG final:
+
+```sh
+./scripts/homebrew.sh > dist/notch-browser.rb
+```
+
+Generator mengambil versi, arsitektur, minimum macOS, dan SHA-256 dari artefak DMG yang diverifikasi. Salin hasilnya ke tap setelah release tersedia; jangan rebuild DMG setelah SHA dipakai cask. Alur lengkap ada di [panduan Homebrew](homebrew.md#memelihara-tap).
+
 ## Menjalankan langsung dan diagnostik
 
 ```sh
@@ -61,6 +73,20 @@ swift run NotchBrowser --show
 
 - `--show`: mulai expanded dan ambil fokus. Pada app bundle gunakan `open dist/NotchBrowser.app --args --show` setelah keluar dari proses lama.
 - `--check-resources`: periksa SVG, cetak lokasi resource, lalu keluar tanpa membuat UI. Exit 1 jika resource hilang/tidak valid.
+
+## Diagnostik loading opt-in
+
+Keluar dari proses lama dahulu, kemudian jalankan executable release langsung dari terminal:
+
+```sh
+./dist/NotchBrowser.app/Contents/MacOS/NotchBrowser --show --diagnose-loading
+```
+
+Output JSON per baris dikirim ke stderr, **tanpa file log otomatis atau pengiriman jaringan**. Isinya ID view/navigasi lokal, waktu pembuatan WebView, start→commit, start→finish, dan fase Navigation Timing yang tersedia. Tidak ada URL, judul, cookie, header, isi halaman, atau teks error. Error hanya memakai kode numerik.
+
+Field `dns_ms`, `connect_ms`, `tls_ms`, `request_to_first_byte_ms`, `download_ms`, `dom_content_loaded_ms`, dan `load_ms` dihitung dalam milidetik. TLS merupakan bagian dari connect, bukan waktu tambahan. `start_to_finish_ms` dari callback native berbeda dari `load_ms` milik halaman; keduanya bukan ukuran first paint. Angka nol tidak otomatis membuktikan cache hit. Field yang tidak tersedia dihilangkan; jika seluruh Navigation Timing tidak tersedia, muncul `navigation_timing_unavailable`. Ada fallback ke API Navigation Timing lama pada WebKit yang memerlukannya.
+
+Flag ini menambahkan satu pembacaan timing per navigasi selesai. Matikan ketika menjalankan benchmark resmi; mode normal tidak melakukan pembacaan tersebut. Callback yang sudah digantikan navigasi baru atau berasal dari tab tertutup diabaikan.
 
 ## Struktur folder
 
@@ -101,7 +127,7 @@ Script build mencetak tiga ukuran berbeda: executable bytes, total byte file bun
 ./scripts/perf.sh
 ```
 
-`perf.sh` menjalankan probe halaman kosong untuk CPU/footprint proses utama dan biaya pembaruan UI. Bukan benchmark JavaScript atau RAM total browser; baca [performa](performance.md).
+`perf.sh` menjalankan probe tab kosong untuk CPU/footprint proses utama, biaya UI, jumlah WebView, serta navigasi pertama/ulang ke fixture HTTP **loopback lokal**. Bukan benchmark JavaScript, first paint, atau RAM total browser; baca [performa](performance.md).
 
 Rincian coverage dan checklist tersedia di [pengujian](testing.md). Gunakan `swift package clean` untuk membersihkan cache build jika diperlukan; perintah ini tidak menghapus artefak `dist/`. `.build/`, `.swiftpm/`, `dist/`, `.DS_Store`, dan log diabaikan oleh version control.
 

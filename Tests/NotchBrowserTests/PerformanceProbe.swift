@@ -43,6 +43,7 @@ struct PerformanceProbe {
         fflush(stdout)
     }
     @MainActor static func main() {
+        setbuf(stdout, nil)
         print("Synthetic blank-page probe: CPU/footprint exclude WebKit subprocesses. Not Speedometer or FPS.")
         _ = NSApplication.shared
         NSApp.appearance = NSAppearance(named: .darkAqua)
@@ -85,10 +86,39 @@ struct PerformanceProbe {
         wait(3)
         sample("10 blank tabs / expanded")
         renderBenchmark(browser, tabs: 10)
+        let root = panel.contentView!.subviews.first { $0.accessibilityIdentifier() == "browser.root" }!
+        let pages = root.subviews.first { $0.accessibilityIdentifier() == "browser.pages" }!
+        let navigation = root.subviews.first { $0.accessibilityIdentifier() == "browser.navigation" }!
+        let address = navigation.subviews.flatMap(\.subviews).compactMap { $0 as? NSTextField }.first!
+        print("WebViews attached to 10 untouched blank tabs: \(pages.subviews.compactMap { $0 as? WKWebView }.count)")
+        print("Total WebViews including the reusable reserve: \(browser.allocatedWebViewCount)")
+        let server = try! LocalHTTPServer()
+        let serverDeadline = Date().addingTimeInterval(3)
+        while server.port == nil && Date() < serverDeadline { wait(0.01) }
+        guard let port = server.port else { fatalError("Loopback server did not start") }
+        let url = "http://127.0.0.1:\(port)/fixture"
+        func loadFixture(_ label: String) {
+            autoreleasepool {
+                let start = ProcessInfo.processInfo.systemUptime
+                address.stringValue = url
+                precondition(NSApp.sendAction(address.action!, to: address.target, from: address))
+                let web = pages.subviews.compactMap { $0 as? WKWebView }.last!
+                wait(0.001)
+                let deadline = Date().addingTimeInterval(5)
+                while Date() < deadline && (web.isLoading || web.url?.absoluteString != url) { wait(0.001) }
+                guard !web.isLoading && web.url?.absoluteString == url else {
+                    fatalError("Loopback fixture navigation did not finish at the requested URL")
+                }
+                print(String(format: "%@: %.2f ms (to WK isLoading=false, not first paint)", label,
+                             (ProcessInfo.processInfo.systemUptime - start) * 1000))
+            }
+        }
+        loadFixture("First loopback HTML load after idle")
+        wait(1)
+        loadFixture("Repeat loopback HTML load in same WebView")
+        withExtendedLifetime(server) {}
         weak var closedView: WKWebView?
         autoreleasepool {
-            let root = panel.contentView!.subviews.first { $0.accessibilityIdentifier() == "browser.root" }!
-            let pages = root.subviews.first { $0.accessibilityIdentifier() == "browser.pages" }!
             closedView = pages.subviews.compactMap { $0 as? WKWebView }.last
             for _ in 1..<10 { invoke("Close Tab") }
         }

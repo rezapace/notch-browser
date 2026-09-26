@@ -2,10 +2,11 @@ import AppKit
 import WebKit
 
 private final class BrowserTab {
-    let webView: WKWebView
+    var webView: WKWebView?
     var observations: [NSKeyValueObservation] = []
     var error: String?
-    var isHome = true
+    var requestedURL: URL?
+    var isHome: Bool { webView == nil }
     var needsRefresh = true
     let item = NSView()
     var titleButton: BrowserButton?
@@ -13,9 +14,9 @@ private final class BrowserTab {
     var title: String {
         if let error { return error }
         if isHome { return "New Tab" }
-        return webView.title.flatMap { $0.isEmpty ? nil : $0 } ?? webView.url?.host ?? "Loading…"
+        return webView?.title.flatMap { $0.isEmpty ? nil : $0 }
+            ?? (requestedURL ?? webView?.url)?.host ?? "Loading…"
     }
-    init(_ webView: WKWebView) { self.webView = webView }
 }
 
 /// Native buttons retain accessibility, first-click behavior and keyboard navigation.
@@ -62,10 +63,11 @@ private final class BrowserButton: NSButton {
 }
 
 /// Minimal chrome only: horizontal tabs, previous/next, and a native URL field.
-/// The browser root and one WebView per tab stay mounted through notch transitions.
+/// Empty tabs are native placeholders. A navigated tab keeps its WebView mounted.
 final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelegate, WKUIDelegate {
     var onDismissRequested: (() -> Void)?
     private let window: WorkspaceWindow
+    private let diagnostics: NavigationDiagnostics?
     private let root = BrowserRootView()
     private let tabStrip = NSView()
     private let toolbar = NSView()
@@ -78,25 +80,47 @@ final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelega
     private var tabs: [BrowserTab] = []
     private var selectedIndex = -1
     private var refreshPending = false
+    private var warmUpWork: DispatchWorkItem?
+    private var preparedWebView: WKWebView?
+    private var warmNavigation: WKNavigation?
+    // Useful for diagnostics without exposing tabs, URLs, or browsing data.
+    var allocatedWebViewCount: Int {
+        tabs.filter { $0.webView != nil }.count + (preparedWebView == nil ? 0 : 1)
+    }
+    private var tabLayoutDirty = true
+    private var navigationDirty = true
+    private var revealSelectionPending = false
+    private var controlsCanRender: Bool { browserPresented && root.controlsVisible }
     private var chromeHideWork: DispatchWorkItem?
     private var browserPresented = false
     private var controlsPinned = false
     private var currentTab: BrowserTab? { tabs.indices.contains(selectedIndex) ? tabs[selectedIndex] : nil }
 
-    init(window: WorkspaceWindow) {
+    init(window: WorkspaceWindow, diagnostics: NavigationDiagnostics? = nil) {
         self.window = window
+        self.diagnostics = diagnostics
         super.init()
         buildChrome()
         makeMenus()
         addTab()
+        // Let the native shell start first, then warm ONE reusable empty engine.
+        // This avoids a cold-process penalty on the user's first URL without
+        // creating WebViews for every blank tab or prefetching any website.
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.allocatedWebViewCount == 0 else { return }
+            let web = self.makeWebView(configuration: WebKitRuntime.configuration())
+            self.preparedWebView = web
+            web.navigationDelegate = self
+            self.warmNavigation = web.loadHTMLString("<!doctype html><meta name='color-scheme' content='dark'><style>html{background:#131516}</style>", baseURL: nil)
+            self.warmUpWork = nil
+        }
+        warmUpWork = work
+        DispatchQueue.main.async(execute: work)
     }
 
     func prepareForPresentation() {
         browserPresented = window.isPresented
         root.layoutSubtreeIfNeeded()
-        flushRefreshes()
-        renderTabs()
-        syncNavigation()
         setControlsVisible(true)
         scheduleChromeHide()
     }
@@ -108,10 +132,13 @@ final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelega
     func focusAddressIfHome() { if currentTab?.isHome == true { focusAddress(nil) } }
 
     private func setControlsVisible(_ visible: Bool) {
-        guard root.controlsVisible != visible else { return }
-        root.controlsVisible = visible
-        tabStrip.isHidden = !visible
-        toolbar.isHidden = !visible
+        if root.controlsVisible != visible {
+            root.controlsVisible = visible
+            tabStrip.isHidden = !visible
+            toolbar.isHidden = !visible
+        }
+        // Also flush on presentation when controls were already marked visible.
+        if visible { flushRefreshes() }
     }
 
     private func scheduleChromeHide() {
@@ -137,7 +164,11 @@ final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelega
         chromeHideWork?.cancel()
         setControlsVisible(true)
     }
-    func controlTextDidEndEditing(_ notification: Notification) { scheduleChromeHide() }
+    func controlTextDidEndEditing(_ notification: Notification) {
+        navigationDirty = true
+        flushRefreshes()
+        scheduleChromeHide()
+    }
 
     @objc private func togglePinnedControls(_ sender: NSMenuItem) {
         controlsPinned.toggle()
@@ -249,12 +280,22 @@ final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelega
 
     // MARK: Tabs / WebKit
 
-    private func addTab(configuration: WKWebViewConfiguration = WebKitRuntime.configuration(), home: Bool = true) {
-        // Preserve configurations supplied by WebKit for window.open, including
-        // their data store/process relationship. Do not replace these with ours.
-        let web = WKWebView(frame: .zero, configuration: configuration)
-        web.navigationDelegate = self
-        web.uiDelegate = self
+    @discardableResult
+    private func addTab(configuration: WKWebViewConfiguration? = nil) -> BrowserTab {
+        let tab = BrowserTab()
+        installTabItem(tab)
+        tabs.append(tab)
+        tabLayoutDirty = true
+        // window.open must return a real WebView synchronously with its original config.
+        if let configuration { ensureWebView(for: tab, configuration: configuration) }
+        selectTab(tabs.count - 1)
+        return tab
+    }
+
+    private func makeWebView(configuration: WKWebViewConfiguration) -> WKWebView {
+        let started = diagnostics.map { _ in ProcessInfo.processInfo.systemUptime }
+        root.layoutSubtreeIfNeeded()
+        let web = WKWebView(frame: pages.bounds, configuration: configuration)
         web.appearance = NSAppearance(named: .darkAqua)
         web.underPageBackgroundColor = NSColor(calibratedWhite: 0.07, alpha: 1)
         web.translatesAutoresizingMaskIntoConstraints = false
@@ -262,14 +303,35 @@ final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelega
         #if DEBUG
         if #available(macOS 13.3, *) { web.isInspectable = true }
         #endif
+        if let started { diagnostics?.created(web, since: started) }
+        return web
+    }
+
+    @discardableResult
+    private func ensureWebView(for tab: BrowserTab, configuration: WKWebViewConfiguration? = nil) -> WKWebView {
+        if let web = tab.webView { return web }
+        warmUpWork?.cancel()
+        warmUpWork = nil
+        let web: WKWebView
+        if let configuration {
+            // A popup must not consume the spare: its related configuration is mandatory.
+            web = makeWebView(configuration: configuration)
+        } else if let preparedWebView {
+            web = preparedWebView
+            self.preparedWebView = nil
+            web.stopLoading()
+        } else {
+            web = makeWebView(configuration: WebKitRuntime.configuration())
+        }
+        tab.webView = web
+        web.navigationDelegate = self
+        web.uiDelegate = self
+        web.isHidden = tab !== currentTab
         pages.addSubview(web)
         NSLayoutConstraint.activate([
             web.topAnchor.constraint(equalTo: pages.topAnchor), web.bottomAnchor.constraint(equalTo: pages.bottomAnchor),
             web.leadingAnchor.constraint(equalTo: pages.leadingAnchor), web.trailingAnchor.constraint(equalTo: pages.trailingAnchor)
         ])
-        let tab = BrowserTab(web)
-        tab.isHome = home
-        installTabItem(tab)
         // Coalesce URL/title/back/forward changes into one main-runloop update.
         let refresh: () -> Void = { [weak self, weak tab] in
             guard let self, let tab else { return }
@@ -281,22 +343,19 @@ final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelega
             web.observe(\.canGoBack) { _, _ in refresh() },
             web.observe(\.canGoForward) { _, _ in refresh() }
         ]
-        tabs.append(tab)
-        selectTab(tabs.count - 1)
-        if home {
-            web.loadHTMLString("<!doctype html><meta name='color-scheme' content='dark'><style>html,body{margin:0;background:#131516}</style>", baseURL: nil)
-        }
+        root.layoutSubtreeIfNeeded()
+        return web
     }
 
     private func selectTab(_ index: Int) {
-        guard tabs.indices.contains(index) else { return }
+        guard tabs.indices.contains(index), index != selectedIndex else { return }
         window.makeFirstResponder(nil)
-        currentTab?.webView.isHidden = true
+        currentTab?.webView?.isHidden = true
         selectedIndex = index
-        currentTab?.webView.isHidden = false
-        flushRefreshes()
-        syncNavigation()
-        renderTabs(revealSelection: true)
+        currentTab?.webView?.isHidden = false
+        tabLayoutDirty = true
+        navigationDirty = true
+        revealSelectionPending = true
         setControlsVisible(true)
         scheduleChromeHide()
     }
@@ -305,17 +364,21 @@ final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelega
         guard let index = tabs.firstIndex(where: { $0 === tab }) else { return }
         let wasSelected = index == selectedIndex
         tab.observations.removeAll()
-        tab.webView.stopLoading()
-        tab.webView.navigationDelegate = nil
-        tab.webView.uiDelegate = nil
-        tab.webView.removeFromSuperview()
+        if let web = tab.webView {
+            diagnostics?.closed(web)
+            web.stopLoading()
+            web.navigationDelegate = nil
+            web.uiDelegate = nil
+            web.removeFromSuperview()
+        }
         tab.item.removeFromSuperview()
         tabs.remove(at: index)
+        tabLayoutDirty = true
         if tabs.isEmpty { selectedIndex = -1; addTab(); return }
         if wasSelected { selectedIndex = -1; selectTab(min(index, tabs.count - 1)) }
         else {
             if index < selectedIndex { selectedIndex -= 1 }
-            renderTabs()
+            flushRefreshes()
         }
     }
 
@@ -351,27 +414,32 @@ final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelega
 
     private func scheduleRefresh(_ tab: BrowserTab) {
         tab.needsRefresh = true
-        guard browserPresented, !refreshPending else { return }
+        if tab === currentTab { navigationDirty = true }
+        // WebKit remains the live model. Hidden chrome only accumulates dirty flags.
+        guard controlsCanRender, !refreshPending else { return }
         refreshPending = true
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.refreshPending = false
-            if self.browserPresented { self.flushRefreshes() }
+            self.flushRefreshes()
         }
     }
 
     private func flushRefreshes() {
+        guard controlsCanRender else { return }
+        renderTabs()
         for tab in tabs where tab.needsRefresh {
             tab.needsRefresh = false
-            if let url = tab.webView.url { tab.isHome = url.absoluteString == "about:blank" }
             updateTabTitle(tab)
-            if tab === currentTab { syncNavigation() }
         }
+        if navigationDirty { syncNavigation() }
     }
 
-    private func renderTabs(revealSelection: Bool = false) {
+    private func renderTabs() {
         let width: CGFloat = 164
         let frame = NSRect(x: 0, y: 0, width: max(tabScroll.contentSize.width, CGFloat(tabs.count) * width), height: 30)
+        guard tabLayoutDirty || tabDocument.frame != frame else { return }
+        tabLayoutDirty = false
         if tabDocument.frame != frame { tabDocument.frame = frame }
         for (index, tab) in tabs.enumerated() {
             let frame = NSRect(x: CGFloat(index) * width, y: 1, width: width - 4, height: 28)
@@ -381,28 +449,34 @@ final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelega
                 tab.isSelected = selected
                 tab.item.layer?.backgroundColor = NSColor.white.withAlphaComponent(selected ? 0.10 : 0.025).cgColor
             }
-            updateTabTitle(tab)
         }
-        if revealSelection, tabs.indices.contains(selectedIndex) {
+        if revealSelectionPending, tabs.indices.contains(selectedIndex) {
             tabDocument.scrollToVisible(tabs[selectedIndex].item.frame)
             tabScroll.reflectScrolledClipView(tabScroll.contentView)
         }
+        revealSelectionPending = false
     }
 
     private func syncNavigation() {
-        guard let tab = currentTab else { return }
-        back.isEnabled = tab.webView.canGoBack
-        forward.isEnabled = tab.webView.canGoForward
+        navigationDirty = true
+        guard controlsCanRender, let tab = currentTab else { return }
+        navigationDirty = false
+        let canGoBack = tab.webView?.canGoBack ?? false
+        let canGoForward = tab.webView?.canGoForward ?? false
+        if back.isEnabled != canGoBack { back.isEnabled = canGoBack }
+        if forward.isEnabled != canGoForward { forward.isEnabled = canGoForward }
         if address.currentEditor() == nil {
-            address.stringValue = tab.isHome ? "" : (tab.webView.url?.absoluteString ?? address.stringValue)
+            let text = (tab.requestedURL ?? tab.webView?.url)?.absoluteString ?? ""
+            if address.stringValue != text { address.stringValue = text }
         }
-        address.toolTip = tab.error
-        window.title = "NotchBrowser · \(tab.title)"
+        if address.toolTip != tab.error { address.toolTip = tab.error }
+        let title = "NotchBrowser · \(tab.title)"
+        if window.title != title { window.title = title }
     }
 
     @objc private func navigateFromAddress(_ sender: Any?) {
         let input = address.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !input.isEmpty, let tab = currentTab else { return }
+        guard !input.isEmpty else { return }
         let target: URL?
         let lower = input.lowercased()
         if lower.hasPrefix("http://") || lower.hasPrefix("https://") { target = URL(string: input) }
@@ -413,11 +487,19 @@ final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelega
             target = search.url
         }
         guard let target else { return }
+        navigate(to: target)
+    }
+
+    /// Materialize the selected tab only when a navigation is actually requested.
+    func navigate(to target: URL) {
+        guard let tab = currentTab else { return }
         tab.error = nil
-        tab.isHome = false
-        window.makeFirstResponder(tab.webView)
-        address.stringValue = target.absoluteString
-        tab.webView.load(URLRequest(url: target))
+        tab.requestedURL = target
+        let web = ensureWebView(for: tab)
+        window.makeFirstResponder(web)
+        scheduleRefresh(tab)
+        flushRefreshes()
+        web.load(URLRequest(url: target))
         scheduleChromeHide()
     }
 
@@ -431,18 +513,43 @@ final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelega
         return false
     }
 
+    private func isWarmNavigation(_ navigation: WKNavigation?) -> Bool {
+        guard let navigation, let warmNavigation else { return false }
+        return navigation === warmNavigation
+    }
+
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        guard !isWarmNavigation(navigation) else { return }
+        diagnostics?.started(webView, navigation: navigation)
         if let tab = tabs.first(where: { $0.webView === webView }) {
             tab.error = nil
             scheduleRefresh(tab)
         }
     }
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        guard !isWarmNavigation(navigation) else { return }
+        diagnostics?.committed(webView, navigation: navigation)
+        if let tab = tabs.first(where: { $0.webView === webView }) {
+            tab.requestedURL = nil
+            scheduleRefresh(tab)
+        }
+    }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if isWarmNavigation(navigation) { warmNavigation = nil; return }
+        diagnostics?.finished(webView, navigation: navigation)
         if let tab = tabs.first(where: { $0.webView === webView }) { scheduleRefresh(tab) }
         scheduleChromeHide()
     }
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { showFailure(webView, error: error) }
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { showFailure(webView, error: error) }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        if isWarmNavigation(navigation) { warmNavigation = nil; return }
+        diagnostics?.failed(webView, navigation: navigation, code: (error as NSError).code)
+        showFailure(webView, error: error)
+    }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        if isWarmNavigation(navigation) { warmNavigation = nil; return }
+        diagnostics?.failed(webView, navigation: navigation, code: (error as NSError).code)
+        showFailure(webView, error: error)
+    }
     private func showFailure(_ webView: WKWebView, error: Error) {
         guard (error as NSError).code != NSURLErrorCancelled else { return }
         if let tab = tabs.first(where: { $0.webView === webView }) {
@@ -451,14 +558,14 @@ final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelega
         }
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        diagnostics?.terminated(webView)
         if let tab = tabs.first(where: { $0.webView === webView }) {
             tab.error = "Reload with ⌘R"
             scheduleRefresh(tab)
         }
     }
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        addTab(configuration: configuration, home: false)
-        return currentTab?.webView
+        addTab(configuration: configuration).webView
     }
     func webViewDidClose(_ webView: WKWebView) {
         if let tab = tabs.first(where: { $0.webView === webView }) { closeTab(tab) }
@@ -473,9 +580,15 @@ final class BrowserController: NSObject, NSTextFieldDelegate, WKNavigationDelega
         window.makeFirstResponder(address)
         address.selectText(nil)
     }
-    @objc private func goBack(_ sender: Any?) { currentTab?.webView.goBack() }
-    @objc private func goForward(_ sender: Any?) { currentTab?.webView.goForward() }
-    @objc private func reload(_ sender: Any?) { currentTab?.error = nil; currentTab?.webView.reload() }
+    @objc private func goBack(_ sender: Any?) { currentTab?.webView?.goBack() }
+    @objc private func goForward(_ sender: Any?) { currentTab?.webView?.goForward() }
+    @objc private func reload(_ sender: Any?) {
+        guard let tab = currentTab, let web = tab.webView else { return }
+        tab.error = nil
+        if let target = tab.requestedURL { navigate(to: target) }
+        else { web.reload() }
+        scheduleRefresh(tab)
+    }
     @objc private func collapse(_ sender: Any?) { onDismissRequested?() }
     @objc private func jumpTab(_ sender: NSMenuItem) { selectTab(sender.tag) }
 

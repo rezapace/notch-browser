@@ -4,6 +4,16 @@
 
 ## Instalasi
 
+Cara singkat dengan Homebrew:
+
+```sh
+brew install --cask rezapace/notch-browser/notch-browser
+```
+
+Baca [panduan Homebrew](homebrew.md) untuk update, uninstall, trust, atau migrasi dari app yang sudah dipasang manual. Persyaratan dan batas signing di bawah tetap berlaku.
+
+Untuk instalasi DMG manual:
+
 1. Buka `dist/NotchBrowser.dmg` hasil build.
 2. Jika versi lama berjalan, keluar dengan **⌘Q**.
 3. Seret `NotchBrowser.app` ke shortcut **Applications**.
@@ -55,6 +65,8 @@ Chrome dan WebView menggunakan appearance gelap. Website yang mendukung `prefers
 - Halaman website yang sudah terbuka tetap dapat membuat request sendiri.
 - History/bookmark UI dan preferensi sidebar lama tidak lagi dipakai. Data/cache lama tidak dihapus otomatis.
 - Collapse tidak menghancurkan tab atau WebView. Login website mengikuti penyimpanan WebKit.
+- Tab kosong memakai UI native. Aplikasi menyiapkan satu engine cadangan dengan HTML lokal, lalu memakainya pada navigasi pertama. Tab kosong tambahan tidak menjalankan engine sendiri; tidak ada prefetch website.
+- Diagnostik loading mati secara default. Flag `--diagnose-loading` hanya mencetak timing numerik lokal, bukan URL, cookie, header, atau isi halaman; lihat [panduan diagnostik](development.md#diagnostik-loading-opt-in).
 
 ## Batasan
 
