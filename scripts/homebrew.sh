@@ -57,6 +57,10 @@ cask "notch-browser" do
     NotchBrowser is ad-hoc signed and is not notarized by Apple.
     If macOS blocks opening, use System Settings > Privacy & Security > Open Anyway
     only if you trust this release.
+
+    For the "Apple could not verify" warning and optional manual xattr steps, see:
+      https://github.com/rezapace/notch-browser/blob/master/docs/homebrew.md#peringatan-gatekeeper
+    Quarantine is not removed automatically.
   EOS
 end
 CASK

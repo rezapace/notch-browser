@@ -23,6 +23,8 @@ Aplikasi memerlukan macOS 13+. Build lokal mengikuti arsitektur mesin pembuatnya
 
 Signing masih **ad-hoc**, belum Developer ID/notarized. Jika macOS memblokir aplikasi, gunakan **System Settings → Privacy & Security → Open Anyway** hanya jika Anda mempercayai sumbernya. Tidak perlu menonaktifkan Gatekeeper secara global.
 
+Jika muncul **“Apple could not verify ‘NotchBrowser.app’ is free of malware…”**, lihat [penanganan peringatan Gatekeeper](homebrew.md#peringatan-gatekeeper), termasuk opsi manual `xattr` beserta konsekuensinya. Panduan tersebut berlaku untuk instalasi Homebrew maupun DMG.
+
 ## Hover dan fokus
 
 1. Startup menampilkan compact notch. Layar dengan notch fisik diprioritaskan; tanpa notch fisik digunakan top-center layar utama.

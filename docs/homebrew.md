@@ -53,6 +53,31 @@ Cask tidak memiliki hook `zap` atau skrip penghapus data. Cookie, cache, dan pro
 - Jika macOS memblokir pembukaan, gunakan **System Settings → Privacy & Security → Open Anyway** hanya bila mempercayai sumbernya. Tidak ada hook untuk menghapus quarantine atau menonaktifkan Gatekeeper.
 - Ini tap proyek sendiri, **bukan** paket yang sudah diterima di `Homebrew/homebrew-cask`.
 
+## Peringatan Gatekeeper
+
+Saat pertama dibuka, macOS dapat menampilkan:
+
+> Apple could not verify “NotchBrowser.app” is free of malware that may harm your Mac or compromise your privacy.
+
+Release masih ad-hoc signed dan belum notarized oleh Apple. **Utamakan System Settings → Privacy & Security → Open Anyway**, hanya jika Anda mempercayai sumber download.
+
+Alternatif Terminal setelah instalasi, **hanya untuk app yang Anda percayai**:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/NotchBrowser.app
+open /Applications/NotchBrowser.app
+```
+
+Perintah ini menghapus atribut quarantine secara rekursif dari app tersebut sehingga melewati pemeriksaan Gatekeeper berbasis quarantine. Ini **bukan** pemindaian malware, bukti keamanan, atau notarization.
+
+Opsi yang lebih luas berikut juga menghapus quarantine, tetapi menghapus **semua extended attributes** di dalam app bundle, bukan hanya quarantine; pilih opsi terbatas di atas bila cukup:
+
+```sh
+xattr -cr /Applications/NotchBrowser.app
+```
+
+Tidak perlu menjalankan kedua opsi. Sesuaikan path jika memasang dengan `--appdir` lain. Cask hanya menampilkan catatan setelah install; perintah `xattr` **tidak dijalankan otomatis**, dan Gatekeeper sistem tidak dinonaktifkan. Update app dapat mengembalikan atribut quarantine.
+
 ## Memelihara tap
 
 Definisi yang dipasang pengguna berada di repository terpisah:
